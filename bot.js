@@ -66,27 +66,20 @@ Gunakan perintah:
 bot.onText(/\/tanya (.+)/, async (msg, match) => {
   const question = match[1].trim()
   if (question.split(' ').length <= 1) {
-    return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', { reply_to_message_id: msg.message_id })
+    return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', {
+      reply_to_message_id: msg.message_id
+    })
   }
 
   const chatType = msg.chat.type
 
-  if (chatType === 'private') {
-    const conv = userConversations.get(msg.from.id) || []
-    const replyText = conv.length > 0 ? conv[conv.length - 1] : ''
-    userConversations.set(msg.from.id, [question])
+  if (chatType === 'private') return
 
+  if (chatType === 'group' || chatType === 'supergroup') {
+    const replyText = msg.reply_to_message?.from?.id === bot.botInfo.id
+      ? msg.reply_to_message.text || ''
+      : ''
     await handleQuestion(msg, question, replyText)
-
-  } else if (chatType === 'group' || chatType === 'supergroup') {
-    if (msg.reply_to_message) {
-      if (msg.reply_to_message.from.id === bot.botInfo.id) {
-        const replyText = msg.reply_to_message.text || ''
-        await handleQuestion(msg, question, replyText)
-      }
-    } else {
-      await handleQuestion(msg, question, '')
-    }
   }
 })
 
@@ -101,7 +94,9 @@ bot.on('message', async (msg) => {
 
     const text = msg.text.trim()
     if (text.split(' ').length <= 1) {
-      return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', { reply_to_message_id: msg.message_id })
+      return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', {
+        reply_to_message_id: msg.message_id
+      })
     }
 
     const conv = userConversations.get(userId) || []
@@ -109,6 +104,25 @@ bot.on('message', async (msg) => {
     userConversations.set(userId, [text])
 
     await handleQuestion(msg, text, replyText)
+  }
+
+  if (chatType === 'group' || chatType === 'supergroup') {
+    const isMentioned = msg.entities?.some(
+      e => e.type === 'mention' &&
+           msg.text.slice(e.offset, e.offset + e.length) === `@${bot.botInfo.username}`
+    )
+
+    if (isMentioned && msg.reply_to_message?.from?.id === msg.from.id) {
+      const question = msg.text.replace(`@${bot.botInfo.username}`, '').trim()
+      if (question.split(' ').length <= 1) {
+        return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', {
+          reply_to_message_id: msg.message_id
+        })
+      }
+
+      const replyText = msg.reply_to_message?.text || ''
+      await handleQuestion(msg, question, replyText)
+    }
   }
 })
 
