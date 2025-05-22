@@ -3,12 +3,10 @@ import TelegramBot from 'node-telegram-bot-api'
 import { GoogleGenAI } from '@google/genai'
 import fs from 'fs/promises'
 
-const DEBUG = process.argv.includes('--debug')
-
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY })
 
-const userQuestions = new Map()
+const userConversations = new Map()
 
 async function readPersona() {
   try {
@@ -20,35 +18,29 @@ async function readPersona() {
   }
 }
 
-async function buildContentText(question) {
-  const persona = await readPersona()
-  if (persona) {
-    return `${persona}\n\n---\n\n${question}`
-  }
-  return question
+async function buildContentText(persona, replyText, question) {
+  let combined = ''
+  if (persona) combined += persona + '\n\n---\n\n'
+  if (replyText) combined += replyText + '\n\n'
+  combined += question
+  return combined
 }
 
-async function handleQuestion(msg, question) {
-  const userId = msg.from.id
-  userQuestions.set(userId, [question])
-
-  if (DEBUG) console.log(`User ${userId} asked: ${question}`)
+async function handleQuestion(msg, question, replyText = '') {
+  const persona = await readPersona()
+  const content = await buildContentText(persona, replyText, question)
 
   try {
-    const fullText = await buildContentText(question)
-
-    if (DEBUG) console.log('Full content sent to AI:', fullText)
-
     const response = await ai.models.generateContent({
       model: 'gemini-2.0-flash',
-      contents: [{ role: 'user', parts: [{ text: fullText }] }],
+      contents: [{ role: 'user', parts: [{ text: content }] }],
     })
 
     const answer = response.candidates?.[0]?.content?.parts?.map(p => p.text).join(' ') || 'Maaf, tidak ada jawaban.'
-    bot.sendMessage(msg.chat.id, answer)
+    await bot.sendMessage(msg.chat.id, answer, { reply_to_message_id: msg.message_id })
   } catch (error) {
     console.error('Error from AI:', error)
-    bot.sendMessage(msg.chat.id, 'Maaf, terjadi kesalahan saat memproses pertanyaan Anda.')
+    await bot.sendMessage(msg.chat.id, 'Maaf, terjadi kesalahan saat memproses pertanyaan Anda.', { reply_to_message_id: msg.message_id })
   }
 }
 
@@ -74,30 +66,55 @@ Gunakan perintah:
 bot.onText(/\/tanya (.+)/, async (msg, match) => {
   const question = match[1].trim()
   if (question.split(' ').length <= 1) {
-    return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.')
+    return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', { reply_to_message_id: msg.message_id })
   }
-  await handleQuestion(msg, question)
+
+  const chatType = msg.chat.type
+
+  if (chatType === 'private') {
+    const conv = userConversations.get(msg.from.id) || []
+    const replyText = conv.length > 0 ? conv[conv.length - 1] : ''
+    userConversations.set(msg.from.id, [question])
+
+    await handleQuestion(msg, question, replyText)
+
+  } else if (chatType === 'group' || chatType === 'supergroup') {
+    if (msg.reply_to_message) {
+      if (msg.reply_to_message.from.id === bot.botInfo.id) {
+        const replyText = msg.reply_to_message.text || ''
+        await handleQuestion(msg, question, replyText)
+      }
+    } else {
+      await handleQuestion(msg, question, '')
+    }
+  }
 })
 
 bot.on('message', async (msg) => {
-  if (!msg.text || !msg.reply_to_message || msg.reply_to_message.from.id !== bot.botInfo.id) return
+  if (!msg.text) return
 
+  const chatType = msg.chat.type
   const userId = msg.from.id
-  const prev = userQuestions.get(userId) || []
-  const combined = `${msg.reply_to_message.text} ${msg.text}`.trim()
 
-  if (combined.split(' ').length <= 1) {
-    return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.')
+  if (chatType === 'private') {
+    if (msg.text.startsWith('/start') || msg.text.startsWith('/help') || msg.text.startsWith('/tanya ')) return
+
+    const text = msg.text.trim()
+    if (text.split(' ').length <= 1) {
+      return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', { reply_to_message_id: msg.message_id })
+    }
+
+    const conv = userConversations.get(userId) || []
+    const replyText = conv.length > 0 ? conv[conv.length - 1] : ''
+    userConversations.set(userId, [text])
+
+    await handleQuestion(msg, text, replyText)
   }
-
-  prev.push(combined)
-  userQuestions.set(userId, prev)
-  await handleQuestion(msg, combined)
 })
 
-bot.getMe().then((info) => {
+bot.getMe().then(info => {
   bot.botInfo = info
   console.log(`Bot is running as @${info.username}`)
-}).catch((err) => {
+}).catch(err => {
   console.error('Failed to get bot info:', err)
 })
