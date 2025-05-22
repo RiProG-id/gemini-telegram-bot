@@ -57,7 +57,18 @@ bot.on('polling_error', (error) => {
 })
 
 bot.onText(/\/start|\/help/, (msg) => {
-  bot.sendMessage(msg.chat.id, 'Selamat Datang! Silakan kirim pertanyaan dengan perintah /tanya [pertanyaan Anda].')
+  const message = `
+Author: @RiProG
+Channel: @RiOpSo
+Group: @RiOpSoDisc
+
+Support me: https://t.me/RiOpSo/2848
+
+Gunakan perintah:
+/tanya [pertanyaan Anda]
+  `.trim()
+
+  bot.sendMessage(msg.chat.id, message)
 })
 
 bot.onText(/\/tanya (.+)/, async (msg, match) => {
