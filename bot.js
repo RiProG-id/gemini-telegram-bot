@@ -49,7 +49,7 @@ async function handleImageRequest(msg, prompt) {
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.0-flash-preview-image-generation',
-      contents: prompt,
+      contents: [{ text: prompt }],
       config: {
         responseModalities: [Modality.TEXT, Modality.IMAGE],
       },
@@ -76,6 +76,57 @@ async function handleImageRequest(msg, prompt) {
   } catch (error) {
     console.error('Error generating image:', error)
     await bot.sendMessage(msg.chat.id, 'Terjadi kesalahan saat membuat gambar.', { reply_to_message_id: msg.message_id })
+  }
+}
+
+async function handleImageEditFromMessage(msg, captionPrompt) {
+  let photo = msg.photo?.at(-1) || msg.reply_to_message?.photo?.at(-1)
+  if (!photo) return
+
+  try {
+    const fileLink = await bot.getFileLink(photo.file_id)
+    const res = await fetch(fileLink)
+    const buffer = await res.arrayBuffer()
+    const base64Image = Buffer.from(buffer).toString('base64')
+
+    const promptText = captionPrompt?.trim() || 'Tambahkan efek artistik pada gambar ini.'
+
+    const contents = [
+      { text: promptText },
+      {
+        inlineData: {
+          mimeType: "image/jpeg",
+          data: base64Image,
+        },
+      },
+    ]
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash-preview-image-generation',
+      contents,
+      config: {
+        responseModalities: [Modality.TEXT, Modality.IMAGE],
+      },
+    })
+
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+      if (part.text) {
+        await bot.sendMessage(msg.chat.id, part.text, { reply_to_message_id: msg.message_id })
+      } else if (part.inlineData) {
+        const imageData = part.inlineData.data
+        const buffer = Buffer.from(imageData, 'base64')
+        const fileName = `image_edit_${msg.message_id}.png`
+        fsSync.writeFileSync(fileName, buffer)
+        await bot.sendPhoto(msg.chat.id, fileName, { reply_to_message_id: msg.message_id })
+        fsSync.unlinkSync(fileName)
+      }
+    }
+
+  } catch (err) {
+    console.error('Error editing image:', err)
+    await bot.sendMessage(msg.chat.id, 'Terjadi kesalahan saat memproses gambar.', {
+      reply_to_message_id: msg.message_id,
+    })
   }
 }
 
@@ -128,6 +179,11 @@ bot.onText(/\/gambar (.+)/, async (msg, match) => {
 })
 
 bot.on('message', async (msg) => {
+  if (msg.photo || msg.reply_to_message?.photo) {
+    const captionPrompt = msg.caption || msg.text || ''
+    return await handleImageEditFromMessage(msg, captionPrompt)
+  }
+
   if (!msg.text) return
 
   const chatType = msg.chat.type
