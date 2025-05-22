@@ -131,6 +131,26 @@ bot.on('message', async (msg) => {
   }
 })
 
+bot.on('new_chat_members', (msg) => {
+  const newMembers = msg.new_chat_members
+  const isBotAdded = newMembers.some(member => member.id === bot.botInfo.id)
+
+  if (isBotAdded) {
+    const startMessage = `
+Author: @RiProG
+Channel: @RiOpSo
+Group: @RiOpSoDisc
+
+Support me: https://t.me/RiOpSo/2848
+
+Gunakan perintah:
+/tanya [pertanyaan Anda]
+    `.trim()
+
+    bot.sendMessage(msg.chat.id, startMessage)
+  }
+})
+
 bot.getMe().then(info => {
   bot.botInfo = info
   console.log(`Bot is running as @${info.username}`)
