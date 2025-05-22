@@ -3,6 +3,7 @@ import TelegramBot from 'node-telegram-bot-api'
 import { GoogleGenAI, Modality } from '@google/genai'
 import fs from 'fs/promises'
 import * as fsSync from 'node:fs'
+import fetch from 'node-fetch'
 
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY })
@@ -45,11 +46,11 @@ async function handleQuestion(msg, question, replyText = '') {
   }
 }
 
-async function handleImageRequest(msg, prompt) {
+async function handleImageRequest(msg, contents) {
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.0-flash-preview-image-generation',
-      contents: [{ text: prompt }],
+      contents: contents,
       config: {
         responseModalities: [Modality.TEXT, Modality.IMAGE],
       },
@@ -76,57 +77,6 @@ async function handleImageRequest(msg, prompt) {
   } catch (error) {
     console.error('Error generating image:', error)
     await bot.sendMessage(msg.chat.id, 'Terjadi kesalahan saat membuat gambar.', { reply_to_message_id: msg.message_id })
-  }
-}
-
-async function handleImageEditFromMessage(msg, captionPrompt) {
-  let photo = msg.photo?.at(-1) || msg.reply_to_message?.photo?.at(-1)
-  if (!photo) return
-
-  try {
-    const fileLink = await bot.getFileLink(photo.file_id)
-    const res = await fetch(fileLink)
-    const buffer = await res.arrayBuffer()
-    const base64Image = Buffer.from(buffer).toString('base64')
-
-    const promptText = captionPrompt?.trim() || 'Tambahkan efek artistik pada gambar ini.'
-
-    const contents = [
-      { text: promptText },
-      {
-        inlineData: {
-          mimeType: "image/jpeg",
-          data: base64Image,
-        },
-      },
-    ]
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-preview-image-generation',
-      contents,
-      config: {
-        responseModalities: [Modality.TEXT, Modality.IMAGE],
-      },
-    })
-
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.text) {
-        await bot.sendMessage(msg.chat.id, part.text, { reply_to_message_id: msg.message_id })
-      } else if (part.inlineData) {
-        const imageData = part.inlineData.data
-        const buffer = Buffer.from(imageData, 'base64')
-        const fileName = `image_edit_${msg.message_id}.png`
-        fsSync.writeFileSync(fileName, buffer)
-        await bot.sendPhoto(msg.chat.id, fileName, { reply_to_message_id: msg.message_id })
-        fsSync.unlinkSync(fileName)
-      }
-    }
-
-  } catch (err) {
-    console.error('Error editing image:', err)
-    await bot.sendMessage(msg.chat.id, 'Terjadi kesalahan saat memproses gambar.', {
-      reply_to_message_id: msg.message_id,
-    })
   }
 }
 
@@ -175,59 +125,107 @@ bot.onText(/\/gambar (.+)/, async (msg, match) => {
       reply_to_message_id: msg.message_id,
     })
   }
-  await handleImageRequest(msg, prompt)
+  const contents = [{ text: prompt }]
+  await handleImageRequest(msg, contents)
 })
 
 bot.on('message', async (msg) => {
-  if (msg.photo || msg.reply_to_message?.photo) {
-    const captionPrompt = msg.caption || msg.text || ''
-    return await handleImageEditFromMessage(msg, captionPrompt)
-  }
-
-  if (!msg.text) return
+  if (!msg.text && !msg.photo) return
 
   const chatType = msg.chat.type
   const userId = msg.from.id
+  const repliedOwnMessage = msg.reply_to_message?.from?.id === bot.botInfo.id
+  const isMentioned = msg.entities?.some(
+    e =>
+      e.type === 'mention' &&
+      msg.text?.slice(e.offset, e.offset + e.length) === `@${bot.botInfo.username}`
+  )
+  const hasPhoto = msg.photo && msg.photo.length > 0
+  const caption = msg.caption?.trim() || ''
 
   if (chatType === 'private') {
-    if (msg.text.startsWith('/start') || msg.text.startsWith('/help') || msg.text.startsWith('/tanya ') || msg.text.startsWith('/gambar ')) return
-
-    const text = msg.text.trim()
-    if (text.split(' ').length <= 1) {
-      return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', {
-        reply_to_message_id: msg.message_id,
-      })
-    }
-
-    const conv = userConversations.get(userId) || []
-    const replyText = conv.length > 0 ? conv[conv.length - 1] : ''
-    userConversations.set(userId, [text])
-
-    await handleQuestion(msg, text, replyText)
-  }
-
-  if (chatType === 'group' || chatType === 'supergroup') {
-    const isMentioned = msg.entities?.some(
-      e =>
-        e.type === 'mention' &&
-        msg.text.slice(e.offset, e.offset + e.length) === `@${bot.botInfo.username}`
+    if (
+      msg.text?.startsWith('/start') ||
+      msg.text?.startsWith('/help') ||
+      msg.text?.startsWith('/tanya ') ||
+      msg.text?.startsWith('/gambar ')
     )
+      return
 
-    const repliedOwnMessage = msg.reply_to_message?.from?.id === bot.botInfo.id
-
-    if (isMentioned || repliedOwnMessage) {
-      const question = isMentioned
-        ? msg.text.replace(`@${bot.botInfo.username}`, '').trim()
-        : msg.text.trim()
-
-      if (question.split(' ').length <= 1) {
+    if (msg.text) {
+      const text = msg.text.trim()
+      if (text.split(' ').length <= 1) {
         return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', {
           reply_to_message_id: msg.message_id,
         })
       }
 
-      const replyText = repliedOwnMessage ? msg.reply_to_message.text || '' : ''
-      await handleQuestion(msg, question, replyText)
+      const conv = userConversations.get(userId) || []
+      const replyText = conv.length > 0 ? conv[conv.length - 1] : ''
+      userConversations.set(userId, [text])
+
+      await handleQuestion(msg, text, replyText)
+    }
+
+    if (hasPhoto) {
+      const fileId = msg.photo[msg.photo.length - 1].file_id
+      const file = await bot.getFile(fileId)
+      const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`
+      const imageBuffer = await fetch(fileUrl).then(res => res.arrayBuffer())
+      const base64Image = Buffer.from(imageBuffer).toString('base64')
+      const prompt = caption || 'Edit this image'
+      const contents = [
+        { text: prompt },
+        {
+          inlineData: {
+            mimeType: 'image/png',
+            data: base64Image,
+          },
+        },
+      ]
+      await handleImageRequest(msg, contents)
+    }
+  }
+
+  if (chatType === 'group' || chatType === 'supergroup') {
+    if (msg.text) {
+      const isCmd = msg.text.startsWith('/tanya') || msg.text.startsWith('/gambar')
+      if (isCmd) return
+
+      if (isMentioned || repliedOwnMessage) {
+        const question = isMentioned ? msg.text.replace(`@${bot.botInfo.username}`, '').trim() : msg.text.trim()
+
+        if (question.split(' ').length <= 1) {
+          return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', {
+            reply_to_message_id: msg.message_id,
+          })
+        }
+
+        const replyText = repliedOwnMessage ? msg.reply_to_message.text || '' : ''
+        await handleQuestion(msg, question, replyText)
+      }
+    }
+
+    if (hasPhoto) {
+      if (caption.length === 0) return
+
+      if (repliedOwnMessage || isMentioned) {
+        const fileId = msg.photo[msg.photo.length - 1].file_id
+        const file = await bot.getFile(fileId)
+        const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`
+        const imageBuffer = await fetch(fileUrl).then(res => res.arrayBuffer())
+        const base64Image = Buffer.from(imageBuffer).toString('base64')
+        const contents = [
+          { text: caption },
+          {
+            inlineData: {
+              mimeType: 'image/png',
+              data: base64Image,
+            },
+          },
+        ]
+        await handleImageRequest(msg, contents)
+      }
     }
   }
 })
