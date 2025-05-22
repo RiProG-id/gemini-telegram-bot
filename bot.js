@@ -112,15 +112,20 @@ bot.on('message', async (msg) => {
            msg.text.slice(e.offset, e.offset + e.length) === `@${bot.botInfo.username}`
     )
 
-    if (isMentioned && msg.reply_to_message?.from?.id === msg.from.id) {
-      const question = msg.text.replace(`@${bot.botInfo.username}`, '').trim()
+    const repliedOwnMessage = msg.reply_to_message?.from?.id === bot.botInfo.id
+
+    if (isMentioned || repliedOwnMessage) {
+      const question = isMentioned
+        ? msg.text.replace(`@${bot.botInfo.username}`, '').trim()
+        : msg.text.trim()
+
       if (question.split(' ').length <= 1) {
         return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', {
           reply_to_message_id: msg.message_id
         })
       }
 
-      const replyText = msg.reply_to_message?.text || ''
+      const replyText = repliedOwnMessage ? msg.reply_to_message.text || '' : ''
       await handleQuestion(msg, question, replyText)
     }
   }
