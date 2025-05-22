@@ -173,6 +173,11 @@ bot.onText(/\/gambar (.+)/, async (msg, match) => {
       reply_to_message_id: msg.message_id,
     })
   }
+
+  if (msg.reply_to_message?.photo || msg.photo) {
+    return
+  }
+
   await handleImageRequest(msg, prompt)
 })
 
