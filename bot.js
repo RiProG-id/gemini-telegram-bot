@@ -1,7 +1,8 @@
 import 'dotenv/config'
 import TelegramBot from 'node-telegram-bot-api'
-import { GoogleGenAI } from '@google/genai'
+import { GoogleGenAI, Modality } from '@google/genai'
 import fs from 'fs/promises'
+import * as fsSync from 'node:fs'
 
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY })
@@ -44,6 +45,40 @@ async function handleQuestion(msg, question, replyText = '') {
   }
 }
 
+async function handleImageRequest(msg, prompt) {
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash-preview-image-generation',
+      contents: prompt,
+      config: {
+        responseModalities: [Modality.TEXT, Modality.IMAGE],
+      },
+    })
+
+    let imageSent = false
+    for (const part of response.candidates[0].content.parts) {
+      if (part.text) {
+        await bot.sendMessage(msg.chat.id, part.text, { reply_to_message_id: msg.message_id })
+      } else if (part.inlineData) {
+        const imageData = part.inlineData.data
+        const buffer = Buffer.from(imageData, 'base64')
+        const fileName = `image_${msg.message_id}.png`
+        fsSync.writeFileSync(fileName, buffer)
+        await bot.sendPhoto(msg.chat.id, fileName, { reply_to_message_id: msg.message_id })
+        fsSync.unlinkSync(fileName)
+        imageSent = true
+      }
+    }
+
+    if (!imageSent) {
+      await bot.sendMessage(msg.chat.id, 'Maaf, tidak dapat membuat gambar.', { reply_to_message_id: msg.message_id })
+    }
+  } catch (error) {
+    console.error('Error generating image:', error)
+    await bot.sendMessage(msg.chat.id, 'Terjadi kesalahan saat membuat gambar.', { reply_to_message_id: msg.message_id })
+  }
+}
+
 bot.on('polling_error', (error) => {
   console.error('Polling error:', error)
 })
@@ -58,6 +93,7 @@ Support me: https://t.me/RiOpSo/2848
 
 Gunakan perintah:
 /tanya [pertanyaan Anda]
+/gambar [deskripsi gambar]
   `.trim()
 
   bot.sendMessage(msg.chat.id, message)
@@ -67,7 +103,7 @@ bot.onText(/\/tanya (.+)/, async (msg, match) => {
   const question = match[1].trim()
   if (question.split(' ').length <= 1) {
     return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', {
-      reply_to_message_id: msg.message_id
+      reply_to_message_id: msg.message_id,
     })
   }
 
@@ -76,11 +112,19 @@ bot.onText(/\/tanya (.+)/, async (msg, match) => {
   if (chatType === 'private') return
 
   if (chatType === 'group' || chatType === 'supergroup') {
-    const replyText = msg.reply_to_message?.from?.id === bot.botInfo.id
-      ? msg.reply_to_message.text || ''
-      : ''
+    const replyText = msg.reply_to_message?.from?.id === bot.botInfo.id ? msg.reply_to_message.text || '' : ''
     await handleQuestion(msg, question, replyText)
   }
+})
+
+bot.onText(/\/gambar (.+)/, async (msg, match) => {
+  const prompt = match[1].trim()
+  if (prompt.length === 0) {
+    return bot.sendMessage(msg.chat.id, 'Deskripsi gambar tidak boleh kosong.', {
+      reply_to_message_id: msg.message_id,
+    })
+  }
+  await handleImageRequest(msg, prompt)
 })
 
 bot.on('message', async (msg) => {
@@ -90,12 +134,12 @@ bot.on('message', async (msg) => {
   const userId = msg.from.id
 
   if (chatType === 'private') {
-    if (msg.text.startsWith('/start') || msg.text.startsWith('/help') || msg.text.startsWith('/tanya ')) return
+    if (msg.text.startsWith('/start') || msg.text.startsWith('/help') || msg.text.startsWith('/tanya ') || msg.text.startsWith('/gambar ')) return
 
     const text = msg.text.trim()
     if (text.split(' ').length <= 1) {
       return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', {
-        reply_to_message_id: msg.message_id
+        reply_to_message_id: msg.message_id,
       })
     }
 
@@ -108,8 +152,9 @@ bot.on('message', async (msg) => {
 
   if (chatType === 'group' || chatType === 'supergroup') {
     const isMentioned = msg.entities?.some(
-      e => e.type === 'mention' &&
-           msg.text.slice(e.offset, e.offset + e.length) === `@${bot.botInfo.username}`
+      e =>
+        e.type === 'mention' &&
+        msg.text.slice(e.offset, e.offset + e.length) === `@${bot.botInfo.username}`
     )
 
     const repliedOwnMessage = msg.reply_to_message?.from?.id === bot.botInfo.id
@@ -121,7 +166,7 @@ bot.on('message', async (msg) => {
 
       if (question.split(' ').length <= 1) {
         return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', {
-          reply_to_message_id: msg.message_id
+          reply_to_message_id: msg.message_id,
         })
       }
 
@@ -145,15 +190,18 @@ Support me: https://t.me/RiOpSo/2848
 
 Gunakan perintah:
 /tanya [pertanyaan Anda]
+/gambar [deskripsi gambar]
     `.trim()
 
     bot.sendMessage(msg.chat.id, startMessage)
   }
 })
 
-bot.getMe().then(info => {
-  bot.botInfo = info
-  console.log(`Bot is running as @${info.username}`)
-}).catch(err => {
-  console.error('Failed to get bot info:', err)
-})
+bot.getMe()
+  .then(info => {
+    bot.botInfo = info
+    console.log(`Bot is running as @${info.username}`)
+  })
+  .catch(err => {
+    console.error('Failed to get bot info:', err)
+  })
