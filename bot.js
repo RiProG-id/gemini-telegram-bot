@@ -151,13 +151,10 @@ Gunakan perintah:
 bot.onText(/\/tanya (.+)/, async (msg, match) => {
   const question = match[1].trim()
   if (question.split(' ').length <= 1) {
-    return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', {
-      reply_to_message_id: msg.message_id,
-    })
+    return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', { reply_to_message_id: msg.message_id })
   }
 
   const chatType = msg.chat.type
-
   if (chatType === 'private') return
 
   if (chatType === 'group' || chatType === 'supergroup') {
@@ -169,14 +166,10 @@ bot.onText(/\/tanya (.+)/, async (msg, match) => {
 bot.onText(/\/gambar (.+)/, async (msg, match) => {
   const prompt = match[1].trim()
   if (prompt.length === 0) {
-    return bot.sendMessage(msg.chat.id, 'Deskripsi gambar tidak boleh kosong.', {
-      reply_to_message_id: msg.message_id,
-    })
+    return bot.sendMessage(msg.chat.id, 'Deskripsi gambar tidak boleh kosong.', { reply_to_message_id: msg.message_id })
   }
 
-  if (msg.reply_to_message?.photo || msg.photo) {
-    return
-  }
+  if (msg.reply_to_message?.photo || msg.photo) return
 
   await handleImageRequest(msg, prompt)
 })
@@ -188,17 +181,13 @@ bot.on('message', async (msg) => {
   const captionPrompt = msg.caption?.trim() || ''
 
   if ((chatType === 'group' || chatType === 'supergroup') && (msg.photo || msg.reply_to_message?.photo)) {
-    const isMentioned = msg.entities?.some(
-      e => e.type === 'mention' && msg.text?.slice(e.offset, e.offset + e.length) === `@${bot.botInfo.username}`
-    )
+    const isMentioned = msg.entities?.some(e => e.type === 'mention' && msg.text?.slice(e.offset, e.offset + e.length) === `@${bot.botInfo.username}`)
     const hasGambarCommand = text.startsWith('/gambar')
 
     if (hasGambarCommand || isMentioned) {
       const prompt = captionPrompt || text.replace('/gambar', '').replace(`@${bot.botInfo.username}`, '').trim()
       return await handleImageEditFromMessage(msg, prompt)
-    } else {
-      return
-    }
+    } else return
   }
 
   if (chatType === 'private' && (msg.photo || msg.reply_to_message?.photo)) {
@@ -209,26 +198,34 @@ bot.on('message', async (msg) => {
   if (!text) return
 
   if (chatType === 'private') {
-    if (text.startsWith('/start') || text.startsWith('/help') || text.startsWith('/tanya ') || text.startsWith('/gambar ')) return
+    if (
+      text.startsWith('/start') ||
+      text.startsWith('/help') ||
+      text.startsWith('/tanya ') ||
+      text.startsWith('/gambar ')
+    ) return
 
-    if (text.split(' ').length <= 1) {
+    if (!msg.reply_to_message || !msg.reply_to_message.text) {
+      return bot.sendMessage(msg.chat.id,
+        'Silakan reply pesan untuk melanjutkan percakapan, atau gunakan /tanya atau /gambar untuk memulai percakapan baru.',
+        { reply_to_message_id: msg.message_id }
+      )
+    }
+
+    const question = text
+    const replyText = msg.reply_to_message.text || ''
+
+    if (question.split(' ').length <= 1) {
       return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', {
         reply_to_message_id: msg.message_id,
       })
     }
 
-    const conv = userConversations.get(userId) || []
-    const replyText = conv.length > 0 ? conv[conv.length - 1] : ''
-    userConversations.set(userId, [text])
-
-    return await handleQuestion(msg, text, replyText)
+    return await handleQuestion(msg, question, replyText)
   }
 
   if (chatType === 'group' || chatType === 'supergroup') {
-    const isMentioned = msg.entities?.some(
-      e => e.type === 'mention' && msg.text?.slice(e.offset, e.offset + e.length) === `@${bot.botInfo.username}`
-    )
-
+    const isMentioned = msg.entities?.some(e => e.type === 'mention' && msg.text?.slice(e.offset, e.offset + e.length) === `@${bot.botInfo.username}`)
     const repliedOwnMessage = msg.reply_to_message?.from?.id === bot.botInfo.id
 
     if (isMentioned || repliedOwnMessage) {
