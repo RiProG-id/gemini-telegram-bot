@@ -48,8 +48,11 @@ async function handleQuestion(msg, question, replyText = '') {
 
     await bot.sendMessage(msg.chat.id, answer, {
       reply_to_message_id: msg.message_id,
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
     })
   } catch (error) {
+    console.error('handleQuestion error:', error)
     await bot.sendMessage(msg.chat.id, 'Maaf, terjadi kesalahan saat memproses pertanyaan Anda.', {
       reply_to_message_id: msg.message_id,
     })
@@ -65,20 +68,22 @@ async function handleImageRequest(msg, prompt) {
     })
 
     let imageSent = false
-    for (const part of response.candidates[0].content.parts) {
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
       if (part.text) {
         await bot.sendMessage(msg.chat.id, part.text, {
           reply_to_message_id: msg.message_id,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
         })
       } else if (part.inlineData) {
         const imageData = part.inlineData.data
         const buffer = Buffer.from(imageData, 'base64')
         const fileName = `image_${msg.message_id}.png`
-        fsSync.writeFileSync(fileName, buffer)
+        await fs.writeFile(fileName, buffer)
         await bot.sendPhoto(msg.chat.id, fileName, {
           reply_to_message_id: msg.message_id,
         })
-        fsSync.unlinkSync(fileName)
+        await fs.unlink(fileName)
         imageSent = true
       }
     }
@@ -88,7 +93,8 @@ async function handleImageRequest(msg, prompt) {
         reply_to_message_id: msg.message_id,
       })
     }
-  } catch {
+  } catch (error) {
+    console.error('handleImageRequest error:', error)
     await bot.sendMessage(msg.chat.id, 'Terjadi kesalahan saat membuat gambar.', {
       reply_to_message_id: msg.message_id,
     })
@@ -102,9 +108,9 @@ async function handleImageEditFromMessage(msg, captionPrompt) {
     msg.reply_to_message?.from?.id === bot.botInfo.id &&
     (msg.reply_to_message.photo || msg.reply_to_message.document?.mime_type?.startsWith('image/'))
   ) {
-    photo = msg.reply_to_message.photo?.at(-1)
+    photo = msg.reply_to_message.photo?.at(-1) || null
   } else {
-    photo = msg.photo?.at(-1) || msg.reply_to_message?.photo?.at(-1)
+    photo = msg.photo?.at(-1) || msg.reply_to_message?.photo?.at(-1) || null
   }
 
   if (!photo) return
@@ -142,19 +148,22 @@ async function handleImageEditFromMessage(msg, captionPrompt) {
       if (part.text) {
         await bot.sendMessage(msg.chat.id, part.text, {
           reply_to_message_id: msg.message_id,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
         })
       } else if (part.inlineData) {
         const imageData = part.inlineData.data
         const buffer = Buffer.from(imageData, 'base64')
         const fileName = `image_edit_${msg.message_id}.png`
-        fsSync.writeFileSync(fileName, buffer)
+        await fs.writeFile(fileName, buffer)
         await bot.sendPhoto(msg.chat.id, fileName, {
           reply_to_message_id: msg.message_id,
         })
-        fsSync.unlinkSync(fileName)
+        await fs.unlink(fileName)
       }
     }
-  } catch {
+  } catch (error) {
+    console.error('handleImageEditFromMessage error:', error)
     await bot.sendMessage(msg.chat.id, 'Terjadi kesalahan saat memproses gambar.', {
       reply_to_message_id: msg.message_id,
     })
@@ -249,14 +258,16 @@ bot.on('message', async msg => {
     ) return
 
     if (!msg.reply_to_message || !msg.reply_to_message.text) {
-      return bot.sendMessage(msg.chat.id,
+      return bot.sendMessage(
+        msg.chat.id,
         `Silakan balas (reply) pesan sebelumnya untuk melanjutkan percakapan,
 
 atau gunakan perintah berikut untuk memulai percakapan baru:
 
 /tanya [pertanyaan Anda]
 /gambar [deskripsi gambar]`,
-        { reply_to_message_id: msg.message_id })
+        { reply_to_message_id: msg.message_id }
+      )
     }
 
     const question = text
