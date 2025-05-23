@@ -44,7 +44,9 @@ async function handleQuestion(msg, question, replyText = '') {
       contents: [{ role: 'user', parts: [{ text: content }] }],
     })
 
-    const answer = response.candidates?.[0]?.content?.parts?.map(p => p.text).join(' ') || 'Maaf, tidak ada jawaban.'
+    const answer =
+      response.candidates?.[0]?.content?.parts?.map(p => p.text).join(' ') ||
+      'Maaf, tidak ada jawaban.'
 
     await bot.sendMessage(msg.chat.id, answer, {
       reply_to_message_id: msg.message_id,
@@ -53,9 +55,11 @@ async function handleQuestion(msg, question, replyText = '') {
     })
   } catch (error) {
     console.error('handleQuestion error:', error)
-    await bot.sendMessage(msg.chat.id, 'Maaf, terjadi kesalahan saat memproses pertanyaan Anda.', {
-      reply_to_message_id: msg.message_id,
-    })
+    await bot.sendMessage(
+      msg.chat.id,
+      'Maaf, terjadi kesalahan saat memproses pertanyaan Anda.',
+      { reply_to_message_id: msg.message_id }
+    )
   }
 }
 
@@ -181,7 +185,9 @@ Support me: https://t.me/RiOpSo/2848
 
 Source Code: https://github.com/RiProG-id/gemini-telegram-bot
 
-Gunakan perintah: /tanya [pertanyaan Anda] /gambar [deskripsi gambar]`
+Gunakan perintah:
+/tanya [pertanyaan Anda]
+/gambar [deskripsi gambar]`
   bot.sendMessage(msg.chat.id, message)
 })
 
@@ -218,24 +224,52 @@ bot.on('message', async msg => {
   const botUsername = bot.botInfo?.username || ''
   const isMentioned = text.includes(`@${botUsername}`) || caption.includes(`@${botUsername}`)
 
-  if (chatType === 'private' && (msg.photo || msg.reply_to_message?.photo)) {
-    if (!caption) {
-      return bot.sendMessage(msg.chat.id, 'Deskripsi gambar tidak boleh kosong.', {
-        reply_to_message_id: msg.message_id,
-      })
+  if (chatType === 'private') {
+    if (
+      msg.photo ||
+      msg.reply_to_message?.photo ||
+      msg.reply_to_message?.document?.mime_type?.startsWith('image/')
+    ) {
+      const promptText = caption || text
+      if (!promptText) {
+        return bot.sendMessage(msg.chat.id, 'Deskripsi gambar tidak boleh kosong.', {
+          reply_to_message_id: msg.message_id,
+        })
+      }
+      return await handleImageEditFromMessage(msg, promptText)
     }
-    return await handleImageEditFromMessage(msg, caption)
-  }
 
-  if (
-    msg.reply_to_message?.from?.id === bot.botInfo.id &&
-    (msg.reply_to_message.photo || msg.reply_to_message.document?.mime_type?.startsWith('image/'))
-  ) {
-    return await handleImageEditFromMessage(msg, caption || text)
+    if (
+      text.startsWith('/start') ||
+      text.startsWith('/help') ||
+      text.startsWith('/tanya ') ||
+      text.startsWith('/gambar ')
+    ) {
+      return
+    }
+
+    if (!msg.reply_to_message || !msg.reply_to_message.text) {
+      return bot.sendMessage(
+        msg.chat.id,
+        `Silakan balas (reply) pesan sebelumnya untuk melanjutkan percakapan,
+
+atau gunakan perintah berikut untuk memulai percakapan baru:
+/tanya [pertanyaan Anda]
+/gambar [deskripsi gambar]`,
+        { reply_to_message_id: msg.message_id }
+      )
+    }
+
+    const question = text
+    const replyText = msg.reply_to_message.text || ''
+    return await handleQuestion(msg, question, replyText)
   }
 
   if (chatType === 'group' || chatType === 'supergroup') {
-    if ((msg.photo || (msg.document?.mime_type?.startsWith('image/'))) && caption.startsWith('/gambar ')) {
+    if (
+      (msg.photo || (msg.document?.mime_type?.startsWith('image/'))) &&
+      caption.startsWith('/gambar ')
+    ) {
       const prompt = caption.replace('/gambar ', '').trim()
       if (!prompt) {
         return bot.sendMessage(msg.chat.id, 'Deskripsi gambar tidak boleh kosong.', {
@@ -245,7 +279,10 @@ bot.on('message', async msg => {
       return await handleImageEditFromMessage(msg, prompt)
     }
 
-    if (text.startsWith('/gambar ') && (msg.reply_to_message?.photo || msg.reply_to_message?.document?.mime_type?.startsWith('image/'))) {
+    if (
+      text.startsWith('/gambar ') &&
+      (msg.reply_to_message?.photo || msg.reply_to_message?.document?.mime_type?.startsWith('image/'))
+    ) {
       const prompt = text.replace('/gambar ', '').trim()
       if (!prompt) {
         return bot.sendMessage(msg.chat.id, 'Deskripsi gambar tidak boleh kosong.', {
@@ -268,7 +305,7 @@ bot.on('message', async msg => {
       return await handleImageEditFromMessage(msg, prompt)
     }
 
-    if (isMentioned && (msg.photo || (msg.document?.mime_type?.startsWith('image/')))) {
+    if (isMentioned && (msg.photo || msg.document?.mime_type?.startsWith('image/'))) {
       let prompt = caption || text.replace(`@${botUsername}`, '').trim()
       if (!prompt) {
         return bot.sendMessage(msg.chat.id, 'Deskripsi gambar tidak boleh kosong.', {
@@ -309,15 +346,14 @@ bot.on('message', async msg => {
         `Silakan balas (reply) pesan sebelumnya untuk melanjutkan percakapan,
 
 atau gunakan perintah berikut untuk memulai percakapan baru:
-
-/tanya [pertanyaan Anda] /gambar [deskripsi gambar]`,
+/tanya [pertanyaan Anda]
+/gambar [deskripsi gambar]`,
         { reply_to_message_id: msg.message_id }
       )
     }
 
     const question = text
     const replyText = msg.reply_to_message.text || ''
-
     return await handleQuestion(msg, question, replyText)
   }
 })
@@ -333,13 +369,16 @@ Support me: https://t.me/RiOpSo/2848
 
 Source Code: https://github.com/RiProG-id/gemini-telegram-bot
 
-Gunakan perintah: /tanya [pertanyaan Anda] /gambar [deskripsi gambar]`
+Gunakan perintah:
+/tanya [pertanyaan Anda]
+/gambar [deskripsi gambar]`
 
     bot.sendMessage(msg.chat.id, startMessage)
   }
 })
 
-bot.getMe()
+bot
+  .getMe()
   .then(info => {
     bot.botInfo = info
     console.log(`Bot is running as @${info.username}`)
