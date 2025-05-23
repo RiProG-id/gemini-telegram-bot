@@ -178,7 +178,7 @@ bot.on('polling_error', error => {
   console.error('Polling error:', error)
 })
 
-bot.onText(/(start|help)/, msg => {
+bot.onText(/^\/(start|help)/, msg => {
   const message = `Author: @RiProG Channel: @RiOpSo Group: @RiOpSoDisc
 
 Support me: https://t.me/RiOpSo/2848
@@ -191,7 +191,7 @@ Gunakan perintah:
   bot.sendMessage(msg.chat.id, message)
 })
 
-bot.onText(/tanya (.+)/, async (msg, match) => {
+bot.onText(/^\/tanya (.+)/, async (msg, match) => {
   if (msg.reply_to_message?.from?.id === bot.botInfo.id) {
     return
   }
@@ -200,7 +200,7 @@ bot.onText(/tanya (.+)/, async (msg, match) => {
   return await handleQuestion(msg, question, replyText)
 })
 
-bot.onText(/gambar (.+)/, async (msg, match) => {
+bot.onText(/^\/gambar (.+)/, async (msg, match) => {
   const prompt = match[1].trim()
   if (prompt.length === 0) {
     return bot.sendMessage(msg.chat.id, 'Deskripsi gambar tidak boleh kosong.', {
