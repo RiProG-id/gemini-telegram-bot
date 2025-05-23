@@ -50,7 +50,6 @@ async function handleQuestion(msg, question, replyText = '') {
       reply_to_message_id: msg.message_id,
     })
   } catch (error) {
-    console.error('Error from AI:', error)
     await bot.sendMessage(msg.chat.id, 'Maaf, terjadi kesalahan saat memproses pertanyaan Anda.', {
       reply_to_message_id: msg.message_id,
     })
@@ -89,8 +88,7 @@ async function handleImageRequest(msg, prompt) {
         reply_to_message_id: msg.message_id,
       })
     }
-  } catch (error) {
-    console.error('Error generating image:', error)
+  } catch {
     await bot.sendMessage(msg.chat.id, 'Terjadi kesalahan saat membuat gambar.', {
       reply_to_message_id: msg.message_id,
     })
@@ -156,8 +154,7 @@ async function handleImageEditFromMessage(msg, captionPrompt) {
         fsSync.unlinkSync(fileName)
       }
     }
-  } catch (err) {
-    console.error('Error editing image:', err)
+  } catch {
     await bot.sendMessage(msg.chat.id, 'Terjadi kesalahan saat memproses gambar.', {
       reply_to_message_id: msg.message_id,
     })
@@ -184,6 +181,9 @@ Gunakan perintah:
 })
 
 bot.onText(/tanya (.+)/, async (msg, match) => {
+  if (msg.reply_to_message?.from?.id === bot.botInfo.id) {
+    return
+  }
   const question = match[1].trim()
   if (question.split(' ').length <= 1) {
     return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', {
