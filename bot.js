@@ -101,13 +101,7 @@ async function handleImageRequest(msg, prompt) {
   }
 }
 
-async function handleImageEditFromMessage(msg, promptText) {
-  if (!promptText || promptText.trim().length === 0) {
-    return bot.sendMessage(msg.chat.id, 'Deskripsi gambar tidak boleh kosong.', {
-      reply_to_message_id: msg.message_id,
-    })
-  }
-
+async function handleImageEditFromMessage(msg, captionPrompt) {
   let photo = null
 
   if (
@@ -119,11 +113,7 @@ async function handleImageEditFromMessage(msg, promptText) {
     photo = msg.photo?.at(-1) || msg.reply_to_message?.photo?.at(-1) || null
   }
 
-  if (!photo) {
-    return bot.sendMessage(msg.chat.id, 'Tidak ada gambar untuk diedit.', {
-      reply_to_message_id: msg.message_id,
-    })
-  }
+  if (!photo) return
 
   try {
     const fileLink = await bot.getFileLink(photo.file_id)
@@ -131,8 +121,15 @@ async function handleImageEditFromMessage(msg, promptText) {
     const buffer = await res.arrayBuffer()
     const base64Image = Buffer.from(buffer).toString('base64')
 
+    const promptText = captionPrompt?.trim()
+    if (!promptText) {
+      return bot.sendMessage(msg.chat.id, 'Deskripsi gambar tidak boleh kosong.', {
+        reply_to_message_id: msg.message_id,
+      })
+    }
+
     const contents = [
-      { text: promptText.trim() },
+      { text: promptText },
       {
         inlineData: {
           mimeType: 'image/jpeg',
@@ -205,7 +202,11 @@ bot.onText(/gambar (.+)/, async (msg, match) => {
     })
   }
 
-  if (msg.reply_to_message?.photo || msg.photo) return
+  if (msg.reply_to_message) {
+    return bot.sendMessage(msg.chat.id, 'Perintah /gambar tidak mendukung reply ke pesan.', {
+      reply_to_message_id: msg.message_id,
+    })
+  }
 
   await handleImageRequest(msg, prompt)
 })
