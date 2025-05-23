@@ -4,6 +4,13 @@ import { GoogleGenAI, Modality } from '@google/genai'
 import fs from 'fs/promises'
 import * as fsSync from 'node:fs'
 
+let fetchFn
+try {
+  fetchFn = fetch
+} catch {
+  fetchFn = (await import('node-fetch')).then(mod => mod.default)
+}
+
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true })
 const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY })
 
@@ -90,7 +97,7 @@ async function handleImageEditFromMessage(msg, captionPrompt) {
 
   try {
     const fileLink = await bot.getFileLink(photo.file_id)
-    const res = await fetch(fileLink)
+    const res = await fetchFn(fileLink)
     const buffer = await res.arrayBuffer()
     const base64Image = Buffer.from(buffer).toString('base64')
 
@@ -180,7 +187,6 @@ bot.onText(/\/gambar (.+)/, async (msg, match) => {
 
 bot.on('message', async (msg) => {
   const chatType = msg.chat.type
-  const userId = msg.from.id
   const text = msg.text?.trim() || ''
   const captionPrompt = msg.caption?.trim() || ''
 
