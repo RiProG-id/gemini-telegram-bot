@@ -101,7 +101,13 @@ async function handleImageRequest(msg, prompt) {
   }
 }
 
-async function handleImageEditFromMessage(msg, captionPrompt) {
+async function handleImageEditFromMessage(msg, promptText) {
+  if (!promptText || promptText.trim().length === 0) {
+    return bot.sendMessage(msg.chat.id, 'Deskripsi gambar tidak boleh kosong.', {
+      reply_to_message_id: msg.message_id,
+    })
+  }
+
   let photo = null
 
   if (
@@ -113,7 +119,11 @@ async function handleImageEditFromMessage(msg, captionPrompt) {
     photo = msg.photo?.at(-1) || msg.reply_to_message?.photo?.at(-1) || null
   }
 
-  if (!photo) return
+  if (!photo) {
+    return bot.sendMessage(msg.chat.id, 'Tidak ada gambar untuk diedit.', {
+      reply_to_message_id: msg.message_id,
+    })
+  }
 
   try {
     const fileLink = await bot.getFileLink(photo.file_id)
@@ -121,15 +131,8 @@ async function handleImageEditFromMessage(msg, captionPrompt) {
     const buffer = await res.arrayBuffer()
     const base64Image = Buffer.from(buffer).toString('base64')
 
-    const promptText = captionPrompt?.trim()
-    if (!promptText) {
-      return bot.sendMessage(msg.chat.id, 'Deskripsi gambar tidak boleh kosong.', {
-        reply_to_message_id: msg.message_id,
-      })
-    }
-
     const contents = [
-      { text: promptText },
+      { text: promptText.trim() },
       {
         inlineData: {
           mimeType: 'image/jpeg',
