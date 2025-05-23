@@ -185,11 +185,6 @@ bot.onText(/tanya (.+)/, async (msg, match) => {
     return
   }
   const question = match[1].trim()
-  if (question.split(' ').length <= 1) {
-    return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', {
-      reply_to_message_id: msg.message_id,
-    })
-  }
   const replyText = msg.reply_to_message?.text || ''
   return await handleQuestion(msg, question, replyText)
 })
@@ -230,16 +225,15 @@ bot.on('message', async msg => {
 
   if (chatType === 'group' || chatType === 'supergroup') {
     const isReply = msg.reply_to_message?.from?.id === bot.botInfo.id
-
     if (isReply) {
       const question = text
-      if (question.split(' ').length <= 1) {
-        return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', {
-          reply_to_message_id: msg.message_id,
-        })
-      }
-
       const replyText = msg.reply_to_message.text || ''
+      return await handleQuestion(msg, question, replyText)
+    }
+
+    if (text.includes(`@${bot.botInfo.username}`)) {
+      const question = text.replace(`@${bot.botInfo.username}`, '').trim()
+      const replyText = msg.reply_to_message?.text || ''
       return await handleQuestion(msg, question, replyText)
     }
   }
@@ -267,12 +261,6 @@ atau gunakan perintah berikut untuk memulai percakapan baru:
 
     const question = text
     const replyText = msg.reply_to_message.text || ''
-
-    if (question.split(' ').length <= 1) {
-      return bot.sendMessage(msg.chat.id, 'Pertanyaan Anda terlalu pendek. Harap berikan pertanyaan yang lebih lengkap.', {
-        reply_to_message_id: msg.message_id,
-      })
-    }
 
     return await handleQuestion(msg, question, replyText)
   }
