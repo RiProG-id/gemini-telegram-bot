@@ -172,10 +172,15 @@ bot.onText(/tanya (.+)/, async (msg, match) => {
   }
 
   const chatType = msg.chat.type
+
   if (chatType === 'private') return
 
   if (chatType === 'group' || chatType === 'supergroup') {
-    const replyText = msg.reply_to_message?.from?.id === bot.botInfo.id ? msg.reply_to_message.text || '' : ''
+    if (!msg.reply_to_message || msg.reply_to_message.from.id !== bot.botInfo.id) {
+      return
+    }
+
+    const replyText = msg.reply_to_message.text || ''
     await handleQuestion(msg, question, replyText)
   }
 })
