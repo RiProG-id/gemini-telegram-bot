@@ -208,12 +208,6 @@ bot.onText(/gambar (.+)/, async (msg, match) => {
     })
   }
 
-  if (msg.reply_to_message) {
-    return bot.sendMessage(msg.chat.id, 'Perintah /gambar tidak mendukung reply ke pesan.', {
-      reply_to_message_id: msg.message_id,
-    })
-  }
-
   await handleImageRequest(msg, prompt)
 })
 
