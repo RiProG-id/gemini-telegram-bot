@@ -92,7 +92,17 @@ async function handleImageRequest(msg, prompt) {
 }
 
 async function handleImageEditFromMessage(msg, captionPrompt) {
-  let photo = msg.photo?.at(-1) || msg.reply_to_message?.photo?.at(-1)
+  let photo = null
+
+  if (
+    msg.reply_to_message?.from?.id === bot.botInfo.id &&
+    (msg.reply_to_message.photo || msg.reply_to_message.document?.mime_type?.startsWith('image/'))
+  ) {
+    photo = msg.reply_to_message.photo?.at(-1)
+  } else {
+    photo = msg.photo?.at(-1) || msg.reply_to_message?.photo?.at(-1)
+  }
+
   if (!photo) return
 
   try {
@@ -141,21 +151,17 @@ bot.on('polling_error', (error) => {
   console.error('Polling error:', error)
 })
 
-bot.onText(/\/(start|help)/, (msg) => {
-  const message = `Author: @RiProG
-Channel: @RiOpSo
-Group: @RiOpSoDisc
+bot.onText(/(start|help)/, (msg) => {
+  const message = `Author: @RiProG Channel: @RiOpSo Group: @RiOpSoDisc
 
 Support me: https://t.me/RiOpSo/2848
 
-Gunakan perintah:
-/tanya [pertanyaan Anda]
+Gunakan perintah: /tanya [pertanyaan Anda]
 /gambar [deskripsi gambar]`
-
   bot.sendMessage(msg.chat.id, message)
 })
 
-bot.onText(/\/tanya (.+)/, async (msg, match) => {
+bot.onText(/tanya (.+)/, async (msg, match) => {
   const question = match[1].trim()
   if (question.split(' ').length <= 1) {
     return bot.sendMessage(
@@ -174,7 +180,7 @@ bot.onText(/\/tanya (.+)/, async (msg, match) => {
   }
 })
 
-bot.onText(/\/gambar (.+)/, async (msg, match) => {
+bot.onText(/gambar (.+)/, async (msg, match) => {
   const prompt = match[1].trim()
   if (prompt.length === 0) {
     return bot.sendMessage(msg.chat.id, 'Deskripsi gambar tidak boleh kosong.', { reply_to_message_id: msg.message_id })
@@ -189,6 +195,13 @@ bot.on('message', async (msg) => {
   const chatType = msg.chat.type
   const text = msg.text?.trim() || ''
   const captionPrompt = msg.caption?.trim() || ''
+
+  if (
+    msg.reply_to_message?.from?.id === bot.botInfo.id &&
+    (msg.reply_to_message.photo || msg.reply_to_message.document?.mime_type?.startsWith('image/'))
+  ) {
+    return await handleImageEditFromMessage(msg, captionPrompt || text)
+  }
 
   if ((chatType === 'group' || chatType === 'supergroup') && (msg.photo || msg.reply_to_message?.photo)) {
     const isMentioned = msg.entities?.some(
@@ -224,6 +237,7 @@ bot.on('message', async (msg) => {
       return bot.sendMessage(
         msg.chat.id,
         `Silakan balas (reply) pesan sebelumnya untuk melanjutkan percakapan,
+
 atau gunakan perintah berikut untuk memulai percakapan baru:
 
 /tanya [pertanyaan Anda]
@@ -278,14 +292,11 @@ bot.on('new_chat_members', (msg) => {
   const isBotAdded = newMembers.some((member) => member.id === bot.botInfo.id)
 
   if (isBotAdded) {
-    const startMessage = `Author: @RiProG
-Channel: @RiOpSo
-Group: @RiOpSoDisc
+    const startMessage = `Author: @RiProG Channel: @RiOpSo Group: @RiOpSoDisc
 
 Support me: https://t.me/RiOpSo/2848
 
-Gunakan perintah:
-/tanya [pertanyaan Anda]
+Gunakan perintah: /tanya [pertanyaan Anda]
 /gambar [deskripsi gambar]`
 
     bot.sendMessage(msg.chat.id, startMessage)
