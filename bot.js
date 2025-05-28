@@ -9,44 +9,62 @@ let fetchFn;
 try {
   fetchFn = fetch;
 } catch {
-  fetchFn = (await import("node-fetch")).then((mod) => mod.default);
+  fetchFn = (await import("node-fetch")).default;
 }
 
-async function resolveTelegramIP() {
+async function resolveIP(hostname) {
   try {
-    const ips = await dns.resolve4("api.telegram.org");
-    return ips?.[0];
+    const ips = await dns.resolve4(hostname);
+    return ips[0];
   } catch (err) {
-    console.error("Gagal resolve IP Telegram:", err);
+    console.error(`Gagal resolve IP untuk ${hostname}:`, err);
     return null;
   }
 }
 
-async function getTelegramHttpsAgent() {
-  const ip = await resolveTelegramIP();
+async function createHttpsAgentWithResolvedIP(hostname) {
+  const ip = await resolveIP(hostname);
   if (!ip) return null;
 
   return new https.Agent({
     host: ip,
-    servername: "api.telegram.org",
-    lookup: (hostname, opts, cb) => {
-      if (hostname === "api.telegram.org") {
-        return cb(null, ip, 4);
+    servername: hostname,
+    lookup: (hostnameToLookup, options, callback) => {
+      if (hostnameToLookup === hostname) {
+        callback(null, ip, 4);
+      } else {
+        dns.lookup(hostnameToLookup, options, callback);
       }
-      dns.lookup(hostname, opts, cb);
     },
   });
 }
 
-const agent = await getTelegramHttpsAgent();
+const telegramAgent = await createHttpsAgentWithResolvedIP("api.telegram.org");
+const googleAgent = await createHttpsAgentWithResolvedIP(
+  "generativelanguage.googleapis.com",
+);
+
+async function fetchWithAgent(url, options = {}) {
+  let agent;
+  if (url.includes("api.telegram.org")) agent = telegramAgent;
+  else if (url.includes("generativelanguage.googleapis.com"))
+    agent = googleAgent;
+  else agent = null;
+
+  if (agent) {
+    options.agent = agent;
+  }
+  return fetchFn(url, options);
+}
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN, {
-  telegram: {
-    agent,
-  },
+  telegram: { agent: telegramAgent },
 });
 
-const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
+const ai = new GoogleGenAI({
+  apiKey: process.env.GOOGLE_API_KEY,
+  fetchOptions: { agent: googleAgent },
+});
 
 const userConversations = new Map();
 
@@ -158,7 +176,7 @@ async function handleImageEditFromMessage(ctx, captionPrompt) {
 
   try {
     const fileLink = await ctx.telegram.getFileLink(photo.file_id);
-    const res = await fetchFn(fileLink.href || fileLink);
+    const res = await fetchWithAgent(fileLink.href || fileLink);
     const buffer = await res.arrayBuffer();
     const base64Image = Buffer.from(buffer).toString("base64");
 
@@ -223,9 +241,7 @@ Support me: https://t.me/RiOpSo/2848
 
 Source Code: https://github.com/RiProG-id/gemini-telegram-bot
 
-Gunakan perintah:
-/tanya [pertanyaan Anda]
-/gambar [deskripsi gambar]`;
+Gunakan perintah: /tanya [pertanyaan Anda] /gambar [deskripsi gambar]`;
   return ctx.reply(message);
 });
 
@@ -236,9 +252,7 @@ Support me: https://t.me/RiOpSo/2848
 
 Source Code: https://github.com/RiProG-id/gemini-telegram-bot
 
-Gunakan perintah:
-/tanya [pertanyaan Anda]
-/gambar [deskripsi gambar]`;
+Gunakan perintah: /tanya [pertanyaan Anda] /gambar [deskripsi gambar]`;
   return ctx.reply(message);
 });
 
@@ -298,10 +312,10 @@ bot.on("message", async (ctx) => {
       return ctx.reply(
         `Silakan balas (reply) pesan sebelumnya untuk melanjutkan percakapan,
 
-atau gunakan perintah berikut untuk memulai percakapan baru:
-/tanya [pertanyaan Anda]
-/gambar [deskripsi gambar]`,
-        { reply_to_message_id: msg.message_id },
+atau gunakan perintah berikut untuk memulai percakapan baru: /tanya [pertanyaan Anda] /gambar [deskripsi gambar]`,
+        {
+          reply_to_message_id: msg.message_id,
+        },
       );
     }
 
@@ -394,9 +408,7 @@ atau gunakan perintah berikut untuk memulai percakapan baru:
       return ctx.reply(
         `Silakan balas (reply) pesan sebelumnya untuk melanjutkan percakapan,
 
-atau gunakan perintah berikut untuk memulai percakapan baru:
-/tanya [pertanyaan Anda]
-/gambar [deskripsi gambar]`,
+atau gunakan perintah berikut untuk memulai percakapan baru: /tanya [pertanyaan Anda] /gambar [deskripsi gambar]`,
         { reply_to_message_id: msg.message_id },
       );
     }
@@ -418,9 +430,7 @@ Support me: https://t.me/RiOpSo/2848
 
 Source Code: https://github.com/RiProG-id/gemini-telegram-bot
 
-Gunakan perintah:
-/tanya [pertanyaan Anda]
-/gambar [deskripsi gambar]`;
+Gunakan perintah: /tanya [pertanyaan Anda] /gambar [deskripsi gambar]`;
 
     await ctx.reply(startMessage);
   }
