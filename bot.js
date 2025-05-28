@@ -2,7 +2,8 @@ import "dotenv/config";
 import { Telegraf } from "telegraf";
 import { GoogleGenAI, Modality } from "@google/genai";
 import fs from "fs/promises";
-import * as fsSync from "node:fs";
+import dns from "dns/promises";
+import https from "https";
 
 let fetchFn;
 try {
@@ -11,7 +12,40 @@ try {
   fetchFn = (await import("node-fetch")).then((mod) => mod.default);
 }
 
-const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
+async function resolveTelegramIP() {
+  try {
+    const ips = await dns.resolve4("api.telegram.org");
+    return ips?.[0];
+  } catch (err) {
+    console.error("Gagal resolve IP Telegram:", err);
+    return null;
+  }
+}
+
+async function getTelegramHttpsAgent() {
+  const ip = await resolveTelegramIP();
+  if (!ip) return null;
+
+  return new https.Agent({
+    host: ip,
+    servername: "api.telegram.org",
+    lookup: (hostname, opts, cb) => {
+      if (hostname === "api.telegram.org") {
+        return cb(null, ip, 4);
+      }
+      dns.lookup(hostname, opts, cb);
+    },
+  });
+}
+
+const agent = await getTelegramHttpsAgent();
+
+const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN, {
+  telegram: {
+    agent,
+  },
+});
+
 const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
 
 const userConversations = new Map();
