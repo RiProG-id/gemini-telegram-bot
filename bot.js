@@ -2,75 +2,28 @@ import "dotenv/config";
 import { Telegraf } from "telegraf";
 import { GoogleGenAI, Modality } from "@google/genai";
 import fs from "fs/promises";
-import dns from "dns/promises";
-import https from "https";
 import axios from "axios";
 
-async function resolveIP(hostname) {
-  try {
-    const ips = await dns.resolve4(hostname);
-    return ips[0];
-  } catch (err) {
-    console.error(`Gagal resolve IP untuk ${hostname}:`, err);
-    return null;
-  }
-}
-
-async function createHttpsAgentWithResolvedIP(hostname) {
-  const ip = await resolveIP(hostname);
-  if (!ip) return null;
-
-  return new https.Agent({
-    host: ip,
-    servername: hostname,
-    lookup: (hostnameToLookup, options, callback) => {
-      if (hostnameToLookup === hostname) {
-        callback(null, ip, 4);
-      } else {
-        dns.lookup(hostnameToLookup, options, callback);
-      }
-    },
-  });
-}
-
-const telegramAgent = await createHttpsAgentWithResolvedIP("api.telegram.org");
-const googleAgent = await createHttpsAgentWithResolvedIP(
-  "generativelanguage.googleapis.com",
-);
-
-async function fetchWithAgent(url, options = {}) {
-  let agent;
-  if (url.includes("api.telegram.org")) agent = telegramAgent;
-  else if (url.includes("generativelanguage.googleapis.com"))
-    agent = googleAgent;
-  else agent = null;
-
+async function fetchDefault(url, options = {}) {
   const axiosConfig = {
     method: options.method || "get",
     url,
     headers: options.headers || {},
     data: options.body || null,
-    httpsAgent: agent || undefined,
     responseType: options.responseType || "json",
   };
 
   const response = await axios(axiosConfig);
-
   if (axiosConfig.responseType === "json") return response.data;
   if (axiosConfig.responseType === "arraybuffer") return response.data;
   return response;
 }
 
-const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN, {
-  telegram: { agent: telegramAgent },
-});
+const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GOOGLE_API_KEY,
-  fetchOptions: { agent: googleAgent },
 });
-
-const userConversations = new Map();
 
 async function readPersona() {
   try {
@@ -182,7 +135,7 @@ async function handleImageEditFromMessage(ctx, captionPrompt) {
 
   try {
     const fileLink = await ctx.telegram.getFileLink(photo.file_id);
-    const res = await fetchWithAgent(fileLink.href || fileLink, {
+    const res = await fetchDefault(fileLink.href || fileLink, {
       responseType: "arraybuffer",
     });
     const base64Image = Buffer.from(res).toString("base64");
@@ -242,31 +195,37 @@ bot.catch((err, ctx) => {
 });
 
 bot.start((ctx) => {
-  const message = `Author: @RiProG Channel: @RiOpSo Group: @RiOpSoDisc
+  const message = `Author: @RiProG
+Channel: @RiOpSo
+Group: @RiOpSoDisc
 
 Support me: https://t.me/RiOpSo/2848
 
 Source Code: https://github.com/RiProG-id/gemini-telegram-bot
 
-Gunakan perintah: /tanya [pertanyaan Anda] /gambar [deskripsi gambar]`;
+Gunakan perintah:
+/tanya [pertanyaan Anda]
+/gambar [deskripsi gambar]`;
   return ctx.reply(message);
 });
 
 bot.help((ctx) => {
-  const message = `Author: @RiProG Channel: @RiOpSo Group: @RiOpSoDisc
+  const message = `Author: @RiProG
+Channel: @RiOpSo
+Group: @RiOpSoDisc
 
 Support me: https://t.me/RiOpSo/2848
 
 Source Code: https://github.com/RiProG-id/gemini-telegram-bot
 
-Gunakan perintah: /tanya [pertanyaan Anda] /gambar [deskripsi gambar]`;
+Gunakan perintah:
+/tanya [pertanyaan Anda]
+/gambar [deskripsi gambar]`;
   return ctx.reply(message);
 });
 
 bot.command("tanya", async (ctx) => {
-  if (ctx.message.reply_to_message?.from?.id === ctx.botInfo.id) {
-    return;
-  }
+  if (ctx.message.reply_to_message?.from?.id === ctx.botInfo.id) return;
   const question = ctx.message.text.replace(/^\/tanya\s+/, "").trim();
   const replyText = ctx.message.reply_to_message?.text || "";
   await handleQuestion(ctx, question, replyText);
@@ -319,7 +278,9 @@ bot.on("message", async (ctx) => {
       return ctx.reply(
         `Silakan balas (reply) pesan sebelumnya untuk melanjutkan percakapan,
 
-atau gunakan perintah berikut untuk memulai percakapan baru: /tanya [pertanyaan Anda] /gambar [deskripsi gambar]`,
+atau gunakan perintah berikut untuk memulai percakapan baru:
+/tanya [pertanyaan Anda]
+/gambar [deskripsi gambar]`,
         { reply_to_message_id: msg.message_id },
       );
     }
@@ -397,31 +358,6 @@ atau gunakan perintah berikut untuk memulai percakapan baru: /tanya [pertanyaan 
       return await handleQuestion(ctx, question, replyText);
     }
   }
-
-  if (!text) return;
-
-  if (chatType === "private") {
-    if (
-      text.startsWith("/start") ||
-      text.startsWith("/help") ||
-      text.startsWith("/tanya ") ||
-      text.startsWith("/gambar ")
-    )
-      return;
-
-    if (!msg.reply_to_message || !msg.reply_to_message.text) {
-      return ctx.reply(
-        `Silakan balas (reply) pesan sebelumnya untuk melanjutkan percakapan,
-
-atau gunakan perintah berikut untuk memulai percakapan baru: /tanya [pertanyaan Anda] /gambar [deskripsi gambar]`,
-        { reply_to_message_id: msg.message_id },
-      );
-    }
-
-    const question = text;
-    const replyText = msg.reply_to_message.text || "";
-    return await handleQuestion(ctx, question, replyText);
-  }
 });
 
 bot.on("new_chat_members", async (ctx) => {
@@ -429,13 +365,17 @@ bot.on("new_chat_members", async (ctx) => {
   const isBotAdded = newMembers.some((member) => member.id === ctx.botInfo.id);
 
   if (isBotAdded) {
-    const startMessage = `Author: @RiProG Channel: @RiOpSo Group: @RiOpSoDisc
+    const startMessage = `Author: @RiProG
+Channel: @RiOpSo
+Group: @RiOpSoDisc
 
 Support me: https://t.me/RiOpSo/2848
 
 Source Code: https://github.com/RiProG-id/gemini-telegram-bot
 
-Gunakan perintah: /tanya [pertanyaan Anda] /gambar [deskripsi gambar]`;
+Gunakan perintah:
+/tanya [pertanyaan Anda]
+/gambar [deskripsi gambar]`;
 
     await ctx.reply(startMessage);
   }
@@ -443,14 +383,16 @@ Gunakan perintah: /tanya [pertanyaan Anda] /gambar [deskripsi gambar]`;
 
 (async () => {
   try {
-    const res = await fetchWithAgent(
+    const res = await fetchDefault(
       `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/getUpdates?offset=-1`,
     );
     const data = res.data;
     const lastUpdateId = data?.result?.[0]?.update_id;
     if (lastUpdateId !== undefined) {
-      await fetchWithAgent(
-        `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/getUpdates?offset=${lastUpdateId + 1}`,
+      await fetchDefault(
+        `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/getUpdates?offset=${
+          lastUpdateId + 1
+        }`,
       );
     }
   } catch (err) {}
