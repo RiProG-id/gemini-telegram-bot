@@ -4,13 +4,7 @@ import { GoogleGenAI, Modality } from "@google/genai";
 import fs from "fs/promises";
 import dns from "dns/promises";
 import https from "https";
-
-let fetchFn;
-try {
-  fetchFn = fetch;
-} catch {
-  fetchFn = (await import("node-fetch")).default;
-}
+import axios from "axios";
 
 async function resolveIP(hostname) {
   try {
@@ -51,10 +45,20 @@ async function fetchWithAgent(url, options = {}) {
     agent = googleAgent;
   else agent = null;
 
-  if (agent) {
-    options.agent = agent;
-  }
-  return fetchFn(url, options);
+  const axiosConfig = {
+    method: options.method || "get",
+    url,
+    headers: options.headers || {},
+    data: options.body || null,
+    httpsAgent: agent || undefined,
+    responseType: options.responseType || "json",
+  };
+
+  const response = await axios(axiosConfig);
+
+  if (axiosConfig.responseType === "json") return response.data;
+  if (axiosConfig.responseType === "arraybuffer") return response.data;
+  return response;
 }
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN, {
@@ -188,9 +192,10 @@ async function handleImageEditFromMessage(ctx, captionPrompt) {
 
   try {
     const fileLink = await ctx.telegram.getFileLink(photo.file_id);
-    const res = await fetchWithAgent(fileLink.href || fileLink);
-    const buffer = await res.arrayBuffer();
-    const base64Image = Buffer.from(buffer).toString("base64");
+    const res = await fetchWithAgent(fileLink.href || fileLink, {
+      responseType: "arraybuffer",
+    });
+    const base64Image = Buffer.from(res).toString("base64");
 
     const promptText = captionPrompt?.trim();
     if (!promptText) {
@@ -325,9 +330,7 @@ bot.on("message", async (ctx) => {
         `Silakan balas (reply) pesan sebelumnya untuk melanjutkan percakapan,
 
 atau gunakan perintah berikut untuk memulai percakapan baru: /tanya [pertanyaan Anda] /gambar [deskripsi gambar]`,
-        {
-          reply_to_message_id: msg.message_id,
-        },
+        { reply_to_message_id: msg.message_id },
       );
     }
 
