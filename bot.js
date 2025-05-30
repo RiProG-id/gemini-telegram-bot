@@ -98,23 +98,13 @@ async function handleQuestion(ctx, question, replyText = "") {
     const response = await ai.models.generateContent({
       model: "gemini-2.0-flash",
       contents: [{ role: "user", parts: [{ text: content }] }],
-      config: {
-        tools: [{ googleSearch: {} }],
-      },
     });
 
     const answer =
       response.candidates?.[0]?.content?.parts?.map((p) => p.text).join(" ") ||
       "Maaf, tidak ada jawaban.";
 
-    let finalReply = `<b>Jawaban:</b>\n${answer}`;
-
-    const grounding =
-      response.candidates?.[0]?.groundingMetadata?.searchEntryPoint
-        ?.renderedContent;
-    if (grounding) {
-      finalReply += `\n\n<b>Sumber dari Google Search:</b>\n${grounding}`;
-    }
+    const finalReply = `<b>Jawaban:</b>\n${answer}`;
 
     await ctx.reply(finalReply, {
       reply_to_message_id: ctx.message.message_id,
