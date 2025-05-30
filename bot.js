@@ -453,6 +453,19 @@ Gunakan perintah: /tanya [pertanyaan Anda] /gambar [deskripsi gambar]`;
 
 (async () => {
   try {
+    const res = await fetchWithAgent(
+      `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/getUpdates?offset=-1`,
+    );
+    const data = res.data;
+    const lastUpdateId = data?.result?.[0]?.update_id;
+    if (lastUpdateId !== undefined) {
+      await fetchWithAgent(
+        `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/getUpdates?offset=${lastUpdateId + 1}`,
+      );
+    }
+  } catch (err) {}
+
+  try {
     const info = await bot.telegram.getMe();
     bot.botInfo = info;
     console.log(`Bot is running as @${info.username}`);
