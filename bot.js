@@ -54,6 +54,9 @@ async function handleQuestion(ctx, question, replyText = "") {
     const response = await ai.models.generateContent({
       model: TEXT_MODEL,
       contents: [{ role: "user", parts: [{ text: content }] }],
+      config: {
+        tools: [{ googleSearch: {} }],
+      },
     });
 
     const answer =
