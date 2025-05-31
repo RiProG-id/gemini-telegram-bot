@@ -4,6 +4,9 @@ import { GoogleGenAI, Modality } from "@google/genai";
 import fs from "fs/promises";
 import axios from "axios";
 
+const TEXT_MODEL = process.env.GOOGLE_MODEL_TEXT;
+const IMAGE_MODEL = process.env.GOOGLE_MODEL_IMAGE;
+
 async function fetchDefault(url, options = {}) {
   const axiosConfig = {
     method: options.method || "get",
@@ -49,7 +52,7 @@ async function handleQuestion(ctx, question, replyText = "") {
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: TEXT_MODEL,
       contents: [{ role: "user", parts: [{ text: content }] }],
     });
 
@@ -75,7 +78,7 @@ async function handleQuestion(ctx, question, replyText = "") {
 async function handleImageRequest(ctx, prompt) {
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash-preview-image-generation",
+      model: IMAGE_MODEL,
       contents: [{ text: prompt }],
       config: { responseModalities: [Modality.TEXT, Modality.IMAGE] },
     });
@@ -158,7 +161,7 @@ async function handleImageEditFromMessage(ctx, captionPrompt) {
     ];
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash-preview-image-generation",
+      model: IMAGE_MODEL,
       contents,
       config: { responseModalities: [Modality.TEXT, Modality.IMAGE] },
     });
