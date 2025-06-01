@@ -3,6 +3,7 @@ import { Telegraf } from "telegraf";
 import { GoogleGenAI, Modality } from "@google/genai";
 import fs from "fs/promises";
 import axios from "axios";
+import telegramifyMarkdown from "telegramify-markdown";
 
 const TEXT_MODEL = process.env.GOOGLE_MODEL_TEXT;
 const IMAGE_MODEL = process.env.GOOGLE_MODEL_IMAGE;
@@ -63,11 +64,11 @@ async function handleQuestion(ctx, question, replyText = "") {
       response.candidates?.[0]?.content?.parts?.map((p) => p.text).join(" ") ||
       "Maaf, tidak ada jawaban.";
 
-    const finalReply = `<b>Jawaban:</b>\n${answer}`;
+    const safeReply = telegramifyMarkdown(answer, "escape");
 
-    await ctx.reply(finalReply, {
+    await ctx.reply(safeReply, {
       reply_to_message_id: ctx.message.message_id,
-      parse_mode: "HTML",
+      parse_mode: "MarkdownV2",
       disable_web_page_preview: false,
     });
   } catch (error) {
@@ -89,9 +90,10 @@ async function handleImageRequest(ctx, prompt) {
     let imageSent = false;
     for (const part of response.candidates?.[0]?.content?.parts || []) {
       if (part.text) {
-        await ctx.reply(part.text, {
+        const safeText = telegramifyMarkdown(part.text, "escape");
+        await ctx.reply(safeText, {
           reply_to_message_id: ctx.message.message_id,
-          parse_mode: "HTML",
+          parse_mode: "MarkdownV2",
           disable_web_page_preview: true,
         });
       } else if (part.inlineData) {
@@ -171,9 +173,10 @@ async function handleImageEditFromMessage(ctx, captionPrompt) {
 
     for (const part of response.candidates?.[0]?.content?.parts || []) {
       if (part.text) {
-        await ctx.reply(part.text, {
+        const safeText = telegramifyMarkdown(part.text, "escape");
+        await ctx.reply(safeText, {
           reply_to_message_id: ctx.message.message_id,
-          parse_mode: "HTML",
+          parse_mode: "MarkdownV2",
           disable_web_page_preview: true,
         });
       } else if (part.inlineData) {
