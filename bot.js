@@ -64,13 +64,16 @@ async function handleQuestion(ctx, question, replyText = "") {
       response.candidates?.[0]?.content?.parts?.map((p) => p.text).join(" ") ||
       "Maaf, tidak ada jawaban.";
 
-    const safeReply = telegramifyMarkdown(answer, "escape");
+    const chunks = answer.match(/[\s\S]{1,3500}(?=\n|$)/g) || [answer];
 
-    await ctx.reply(safeReply, {
-      reply_to_message_id: ctx.message.message_id,
-      parse_mode: "MarkdownV2",
-      disable_web_page_preview: false,
-    });
+    for (const chunk of chunks) {
+      const safeText = telegramifyMarkdown(chunk, "escape");
+      await ctx.reply(safeText, {
+        reply_to_message_id: ctx.message.message_id,
+        parse_mode: "MarkdownV2",
+        disable_web_page_preview: false,
+      });
+    }
   } catch (error) {
     console.error("handleQuestion error:", error);
     await ctx.reply("Maaf, terjadi kesalahan saat memproses pertanyaan Anda.", {
@@ -399,9 +402,7 @@ Gunakan perintah:
     const lastUpdateId = data?.result?.[0]?.update_id;
     if (lastUpdateId !== undefined) {
       await fetchDefault(
-        `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/getUpdates?offset=${
-          lastUpdateId + 1
-        }`,
+        `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/getUpdates?offset=${lastUpdateId + 1}`,
       );
     }
   } catch (err) {}
