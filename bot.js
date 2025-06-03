@@ -41,15 +41,41 @@ const readPersona = async () => {
 const buildContentText = async (persona, replyText, question) =>
   [persona, replyText, question].filter(Boolean).join("\n\n");
 
+const splitSafeChunks = (text, maxLength = 3500) => {
+  const paragraphs = text.split("\n\n");
+  const chunks = [];
+  let current = "";
+  for (const p of paragraphs) {
+    if ((current + "\n\n" + p).length <= maxLength) {
+      current += (current ? "\n\n" : "") + p;
+    } else {
+      if (current) chunks.push(current);
+      current = p;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+};
+
 const replyInChunks = async (ctx, text) => {
-  const chunks = text.match(/[\s\S]{1,3500}(?=\n|$)/g) || [text];
+  const chunks = splitSafeChunks(text);
   for (const chunk of chunks) {
     const safeText = telegramifyMarkdown(chunk, "escape");
-    await ctx.reply(safeText, {
-      reply_to_message_id: ctx.message.message_id,
-      parse_mode: "MarkdownV2",
-      disable_web_page_preview: false,
-    });
+    try {
+      await ctx.reply(safeText, {
+        reply_to_message_id: ctx.message.message_id,
+        parse_mode: "MarkdownV2",
+        disable_web_page_preview: false,
+      });
+    } catch (e) {
+      console.error("Markdown parse error:", e);
+      await ctx.reply(
+        "Terjadi kesalahan saat mengirim balasan (format markdown).",
+        {
+          reply_to_message_id: ctx.message.message_id,
+        },
+      );
+    }
   }
 };
 
