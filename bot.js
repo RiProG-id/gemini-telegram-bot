@@ -5,103 +5,94 @@ import fs from "fs/promises";
 import axios from "axios";
 import telegramifyMarkdown from "telegramify-markdown";
 
-const TEXT_MODEL = process.env.GOOGLE_MODEL_TEXT;
-const IMAGE_MODEL = process.env.GOOGLE_MODEL_IMAGE;
+const {
+  TELEGRAM_BOT_TOKEN,
+  GOOGLE_API_KEY,
+  GOOGLE_MODEL_TEXT,
+  GOOGLE_MODEL_IMAGE,
+} = process.env;
 
-async function fetchDefault(url, options = {}) {
-  const axiosConfig = {
+const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
+const ai = new GoogleGenAI({ apiKey: GOOGLE_API_KEY });
+
+const fetchDefault = async (url, options = {}) => {
+  const config = {
     method: options.method || "get",
     url,
     headers: options.headers || {},
     data: options.body || null,
     responseType: options.responseType || "json",
   };
+  const response = await axios(config);
+  return config.responseType === "json" || config.responseType === "arraybuffer"
+    ? response.data
+    : response;
+};
 
-  const response = await axios(axiosConfig);
-  if (axiosConfig.responseType === "json") return response.data;
-  if (axiosConfig.responseType === "arraybuffer") return response.data;
-  return response;
-}
-
-const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
-
-const ai = new GoogleGenAI({
-  apiKey: process.env.GOOGLE_API_KEY,
-});
-
-async function readPersona() {
+const readPersona = async () => {
   try {
-    const content = await fs.readFile("./persona.txt", "utf-8");
-    const trimmed = content.trim();
-    return trimmed.length > 0 ? trimmed : null;
+    const content = (await fs.readFile("./persona.txt", "utf-8")).trim();
+    return content || null;
   } catch {
     return null;
   }
-}
+};
 
-async function buildContentText(persona, replyText, question) {
-  let combined = "";
-  if (persona) combined += persona + "\n\n---\n\n";
-  if (replyText) combined += replyText + "\n\n";
-  combined += question;
-  return combined;
-}
+const buildContentText = async (persona, replyText, question) =>
+  [persona, replyText, question].filter(Boolean).join("\n\n");
 
-async function handleQuestion(ctx, question, replyText = "") {
-  const persona = await readPersona();
-  const content = await buildContentText(persona, replyText, question);
-
-  try {
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
-      contents: [{ role: "user", parts: [{ text: content }] }],
-      config: {
-        tools: [{ googleSearch: {} }],
-      },
+const replyInChunks = async (ctx, text) => {
+  const chunks = text.match(/[\s\S]{1,3500}(?=\n|$)/g) || [text];
+  for (const chunk of chunks) {
+    const safeText = telegramifyMarkdown(chunk, "escape");
+    await ctx.reply(safeText, {
+      reply_to_message_id: ctx.message.message_id,
+      parse_mode: "MarkdownV2",
+      disable_web_page_preview: false,
     });
+  }
+};
 
+const handleQuestion = async (ctx, question, replyText = "") => {
+  try {
+    const persona = await readPersona();
+    const content = await buildContentText(persona, replyText, question);
+    const res = await ai.models.generateContent({
+      model: GOOGLE_MODEL_TEXT,
+      contents: [{ role: "user", parts: [{ text: content }] }],
+      config: { tools: [{ googleSearch: {} }] },
+    });
     const answer =
-      response.candidates?.[0]?.content?.parts?.map((p) => p.text).join(" ") ||
+      res.candidates?.[0]?.content?.parts?.map((p) => p.text).join(" ") ||
       "Maaf, tidak ada jawaban.";
-
-    const chunks = answer.match(/[\s\S]{1,3500}(?=\n|$)/g) || [answer];
-
-    for (const chunk of chunks) {
-      const safeText = telegramifyMarkdown(chunk, "escape");
-      await ctx.reply(safeText, {
-        reply_to_message_id: ctx.message.message_id,
-        parse_mode: "MarkdownV2",
-        disable_web_page_preview: false,
-      });
-    }
-  } catch (error) {
-    console.error("handleQuestion error:", error);
+    await replyInChunks(ctx, answer);
+  } catch (e) {
+    console.error("handleQuestion error:", e);
     await ctx.reply("Maaf, terjadi kesalahan saat memproses pertanyaan Anda.", {
       reply_to_message_id: ctx.message.message_id,
     });
   }
-}
+};
 
-async function handleImageRequest(ctx, prompt) {
+const handleImageRequest = async (ctx, prompt) => {
   try {
-    const response = await ai.models.generateContent({
-      model: IMAGE_MODEL,
+    const res = await ai.models.generateContent({
+      model: GOOGLE_MODEL_IMAGE,
       contents: [{ text: prompt }],
       config: { responseModalities: [Modality.TEXT, Modality.IMAGE] },
     });
 
-    let imageSent = false;
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
+    let sent = false;
+    for (const part of res.candidates?.[0]?.content?.parts || []) {
       if (part.text) {
-        const safeText = telegramifyMarkdown(part.text, "escape");
-        await ctx.reply(safeText, {
+        const text = telegramifyMarkdown(part.text, "escape");
+        await ctx.reply(text, {
           reply_to_message_id: ctx.message.message_id,
           parse_mode: "MarkdownV2",
           disable_web_page_preview: true,
         });
       } else if (part.inlineData) {
-        const imageData = part.inlineData.data;
-        const buffer = Buffer.from(imageData, "base64");
+        const buffer = Buffer.from(part.inlineData.data, "base64");
         const fileName = `image_${ctx.message.message_id}.png`;
         await fs.writeFile(fileName, buffer);
         await ctx.replyWithPhoto(
@@ -109,38 +100,31 @@ async function handleImageRequest(ctx, prompt) {
           { reply_to_message_id: ctx.message.message_id },
         );
         await fs.unlink(fileName);
-        imageSent = true;
+        sent = true;
       }
     }
-
-    if (!imageSent) {
+    if (!sent)
       await ctx.reply("Maaf, tidak dapat membuat gambar.", {
         reply_to_message_id: ctx.message.message_id,
       });
-    }
-  } catch (error) {
-    console.error("handleImageRequest error:", error);
+  } catch (e) {
+    console.error("handleImageRequest error:", e);
     await ctx.reply("Terjadi kesalahan saat membuat gambar.", {
       reply_to_message_id: ctx.message.message_id,
     });
   }
-}
+};
 
-async function handleImageEditFromMessage(ctx, captionPrompt) {
-  let photo = null;
-
+const handleImageEditFromMessage = async (ctx, prompt) => {
+  let photo =
+    ctx.message.photo?.slice(-1)[0] ||
+    ctx.message.reply_to_message?.photo?.slice(-1)[0] ||
+    null;
   if (
-    ctx.message.reply_to_message?.from?.id === ctx.botInfo.id &&
-    (ctx.message.reply_to_message.photo ||
-      ctx.message.reply_to_message.document?.mime_type?.startsWith("image/"))
-  ) {
-    photo = ctx.message.reply_to_message.photo?.slice(-1)[0] || null;
-  } else {
-    photo =
-      ctx.message.photo?.slice(-1)[0] ||
-      ctx.message.reply_to_message?.photo?.slice(-1)[0] ||
-      null;
-  }
+    !photo &&
+    ctx.message.reply_to_message?.document?.mime_type?.startsWith("image/")
+  )
+    photo = ctx.message.reply_to_message.document;
 
   if (!photo) return;
 
@@ -151,40 +135,32 @@ async function handleImageEditFromMessage(ctx, captionPrompt) {
     });
     const base64Image = Buffer.from(res).toString("base64");
 
-    const promptText = captionPrompt?.trim();
-    if (!promptText) {
+    if (!prompt)
       return ctx.reply("Deskripsi gambar tidak boleh kosong.", {
         reply_to_message_id: ctx.message.message_id,
       });
-    }
 
     const contents = [
-      { text: promptText },
-      {
-        inlineData: {
-          mimeType: "image/jpeg",
-          data: base64Image,
-        },
-      },
+      { text: prompt },
+      { inlineData: { mimeType: "image/jpeg", data: base64Image } },
     ];
 
     const response = await ai.models.generateContent({
-      model: IMAGE_MODEL,
+      model: GOOGLE_MODEL_IMAGE,
       contents,
       config: { responseModalities: [Modality.TEXT, Modality.IMAGE] },
     });
 
     for (const part of response.candidates?.[0]?.content?.parts || []) {
       if (part.text) {
-        const safeText = telegramifyMarkdown(part.text, "escape");
-        await ctx.reply(safeText, {
+        const text = telegramifyMarkdown(part.text, "escape");
+        await ctx.reply(text, {
           reply_to_message_id: ctx.message.message_id,
           parse_mode: "MarkdownV2",
           disable_web_page_preview: true,
         });
       } else if (part.inlineData) {
-        const imageData = part.inlineData.data;
-        const buffer = Buffer.from(imageData, "base64");
+        const buffer = Buffer.from(part.inlineData.data, "base64");
         const fileName = `image_edit_${ctx.message.message_id}.png`;
         await fs.writeFile(fileName, buffer);
         await ctx.replyWithPhoto(
@@ -194,47 +170,29 @@ async function handleImageEditFromMessage(ctx, captionPrompt) {
         await fs.unlink(fileName);
       }
     }
-  } catch (error) {
-    console.error("handleImageEditFromMessage error:", error);
+  } catch (e) {
+    console.error("handleImageEditFromMessage error:", e);
     await ctx.reply("Terjadi kesalahan saat memproses gambar.", {
       reply_to_message_id: ctx.message.message_id,
     });
   }
-}
+};
 
-bot.catch((err, ctx) => {
-  console.error(`Error for ${ctx.updateType}`, err);
-});
+bot.catch((err, ctx) => console.error(`Error for ${ctx.updateType}:`, err));
 
-bot.start((ctx) => {
-  const message = `Author: @RiProG
+const welcomeMsg = `Author: @RiProG
 Channel: @RiOpSo
 Group: @RiOpSoDisc
 
 Support me: https://t.me/RiOpSo/2848
-
 Source Code: https://github.com/RiProG-id/gemini-telegram-bot
 
 Gunakan perintah:
 /tanya [pertanyaan Anda]
 /gambar [deskripsi gambar]`;
-  return ctx.reply(message);
-});
 
-bot.help((ctx) => {
-  const message = `Author: @RiProG
-Channel: @RiOpSo
-Group: @RiOpSoDisc
-
-Support me: https://t.me/RiOpSo/2848
-
-Source Code: https://github.com/RiProG-id/gemini-telegram-bot
-
-Gunakan perintah:
-/tanya [pertanyaan Anda]
-/gambar [deskripsi gambar]`;
-  return ctx.reply(message);
-});
+bot.start((ctx) => ctx.reply(welcomeMsg));
+bot.help((ctx) => ctx.reply(welcomeMsg));
 
 bot.command("tanya", async (ctx) => {
   if (ctx.message.reply_to_message?.from?.id === ctx.botInfo.id) return;
@@ -245,74 +203,49 @@ bot.command("tanya", async (ctx) => {
 
 bot.command("gambar", async (ctx) => {
   const prompt = ctx.message.text.replace(/^\/gambar\s+/, "").trim();
-  if (prompt.length === 0) {
+  if (!prompt)
     return ctx.reply("Deskripsi gambar tidak boleh kosong.", {
       reply_to_message_id: ctx.message.message_id,
     });
-  }
   await handleImageRequest(ctx, prompt);
 });
 
 bot.on("message", async (ctx) => {
   const msg = ctx.message;
-  const chatType = msg.chat.type;
+  const { type } = msg.chat;
   const text = msg.text?.trim() || "";
   const caption = msg.caption?.trim() || "";
   const botUsername = ctx.botInfo?.username || "";
-  const isMentioned =
+  const isMention =
     text.includes(`@${botUsername}`) || caption.includes(`@${botUsername}`);
+  const promptText = caption || text;
 
-  if (chatType === "private") {
+  if (type === "private") {
     if (
       msg.photo ||
       msg.reply_to_message?.photo ||
       msg.reply_to_message?.document?.mime_type?.startsWith("image/")
-    ) {
-      const promptText = caption || text;
-      if (!promptText) {
-        return ctx.reply("Deskripsi gambar tidak boleh kosong.", {
-          reply_to_message_id: msg.message_id,
-        });
-      }
+    )
       return await handleImageEditFromMessage(ctx, promptText);
+
+    if (!/^\/(start|help|tanya |gambar )/.test(text)) {
+      if (!msg.reply_to_message?.text)
+        return ctx.reply(
+          `Silakan balas pesan sebelumnya atau gunakan perintah:\n/tanya [pertanyaan Anda]\n/gambar [deskripsi gambar]`,
+          {
+            reply_to_message_id: msg.message_id,
+          },
+        );
+      await handleQuestion(ctx, text, msg.reply_to_message.text);
     }
-
-    if (
-      text.startsWith("/start") ||
-      text.startsWith("/help") ||
-      text.startsWith("/tanya ") ||
-      text.startsWith("/gambar ")
-    ) {
-      return;
-    }
-
-    if (!msg.reply_to_message || !msg.reply_to_message.text) {
-      return ctx.reply(
-        `Silakan balas (reply) pesan sebelumnya untuk melanjutkan percakapan,
-
-atau gunakan perintah berikut untuk memulai percakapan baru:
-/tanya [pertanyaan Anda]
-/gambar [deskripsi gambar]`,
-        { reply_to_message_id: msg.message_id },
-      );
-    }
-
-    const question = text;
-    const replyText = msg.reply_to_message.text || "";
-    return await handleQuestion(ctx, question, replyText);
   }
 
-  if (chatType === "group" || chatType === "supergroup") {
+  if (["group", "supergroup"].includes(type)) {
     if (
       (msg.photo || msg.document?.mime_type?.startsWith("image/")) &&
       caption.startsWith("/gambar ")
     ) {
       const prompt = caption.replace("/gambar ", "").trim();
-      if (!prompt) {
-        return ctx.reply("Deskripsi gambar tidak boleh kosong.", {
-          reply_to_message_id: msg.message_id,
-        });
-      }
       return await handleImageEditFromMessage(ctx, prompt);
     }
 
@@ -320,100 +253,64 @@ atau gunakan perintah berikut untuk memulai percakapan baru:
       text.startsWith("/gambar ") &&
       (msg.reply_to_message?.photo ||
         msg.reply_to_message?.document?.mime_type?.startsWith("image/"))
-    ) {
-      const prompt = text.replace("/gambar ", "").trim();
-      if (!prompt) {
-        return ctx.reply("Deskripsi gambar tidak boleh kosong.", {
-          reply_to_message_id: msg.message_id,
-        });
-      }
-      return await handleImageEditFromMessage(ctx, prompt);
-    }
+    )
+      return await handleImageEditFromMessage(
+        ctx,
+        text.replace("/gambar ", "").trim(),
+      );
 
     if (
       msg.reply_to_message?.from?.id === ctx.botInfo.id &&
       (msg.reply_to_message.photo ||
         msg.reply_to_message.document?.mime_type?.startsWith("image/"))
-    ) {
-      const prompt = caption || text;
-      if (!prompt) {
-        return ctx.reply("Deskripsi gambar tidak boleh kosong.", {
-          reply_to_message_id: msg.message_id,
-        });
-      }
-      return await handleImageEditFromMessage(ctx, prompt);
-    }
+    )
+      return await handleImageEditFromMessage(ctx, promptText);
 
     if (
-      isMentioned &&
+      isMention &&
       (msg.photo || msg.document?.mime_type?.startsWith("image/"))
-    ) {
-      let prompt = caption || text.replace(`@${botUsername}`, "").trim();
-      if (!prompt) {
-        return ctx.reply("Deskripsi gambar tidak boleh kosong.", {
-          reply_to_message_id: msg.message_id,
-        });
-      }
-      return await handleImageEditFromMessage(ctx, prompt);
-    }
+    )
+      return await handleImageEditFromMessage(
+        ctx,
+        promptText.replace(`@${botUsername}`, "").trim(),
+      );
 
-    const isReplyToBot = msg.reply_to_message?.from?.id === ctx.botInfo.id;
-    if (isReplyToBot) {
-      const question = text;
-      const replyText = msg.reply_to_message.text || "";
-      return await handleQuestion(ctx, question, replyText);
-    }
+    if (msg.reply_to_message?.from?.id === ctx.botInfo.id)
+      return await handleQuestion(ctx, text, msg.reply_to_message.text);
 
-    if (text.includes(`@${botUsername}`)) {
-      const question = text.replace(`@${botUsername}`, "").trim();
-      const replyText = msg.reply_to_message?.text || "";
-      return await handleQuestion(ctx, question, replyText);
-    }
+    if (text.includes(`@${botUsername}`))
+      return await handleQuestion(
+        ctx,
+        text.replace(`@${botUsername}`, "").trim(),
+        msg.reply_to_message?.text || "",
+      );
   }
 });
 
 bot.on("new_chat_members", async (ctx) => {
-  const newMembers = ctx.message.new_chat_members || [];
-  const isBotAdded = newMembers.some((member) => member.id === ctx.botInfo.id);
-
-  if (isBotAdded) {
-    const startMessage = `Author: @RiProG
-Channel: @RiOpSo
-Group: @RiOpSoDisc
-
-Support me: https://t.me/RiOpSo/2848
-
-Source Code: https://github.com/RiProG-id/gemini-telegram-bot
-
-Gunakan perintah:
-/tanya [pertanyaan Anda]
-/gambar [deskripsi gambar]`;
-
-    await ctx.reply(startMessage);
-  }
+  if (ctx.message.new_chat_members?.some((m) => m.id === ctx.botInfo.id))
+    await ctx.reply(welcomeMsg);
 });
 
 (async () => {
   try {
-    const res = await fetchDefault(
-      `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/getUpdates?offset=-1`,
+    const updates = await fetchDefault(
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?offset=-1`,
     );
-    const data = res.data;
-    const lastUpdateId = data?.result?.[0]?.update_id;
-    if (lastUpdateId !== undefined) {
+    const lastId = updates?.result?.[0]?.update_id;
+    if (lastId !== undefined)
       await fetchDefault(
-        `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/getUpdates?offset=${lastUpdateId + 1}`,
+        `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?offset=${lastId + 1}`,
       );
-    }
-  } catch (err) {}
+  } catch {}
 
   try {
     const info = await bot.telegram.getMe();
     bot.botInfo = info;
     console.log(`Bot is running as @${info.username}`);
     await bot.launch();
-  } catch (err) {
-    console.error("Failed to get bot info:", err);
+  } catch (e) {
+    console.error("Failed to get bot info:", e);
   }
 })();
 
