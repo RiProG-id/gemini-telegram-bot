@@ -12,28 +12,44 @@ const {
   GOOGLE_MODEL_IMAGE,
 } = process.env;
 
+console.log("🟢 Starting bot with config:");
+console.log({
+  TELEGRAM_BOT_TOKEN: TELEGRAM_BOT_TOKEN ? "✅ Loaded" : "❌ Missing",
+  GOOGLE_API_KEY: GOOGLE_API_KEY ? "✅ Loaded" : "❌ Missing",
+  GOOGLE_MODEL_TEXT,
+  GOOGLE_MODEL_IMAGE,
+});
+
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 const ai = new GoogleGenAI({ apiKey: GOOGLE_API_KEY });
 
 const fetchDefault = async (url, options = {}) => {
-  const config = {
-    method: options.method || "get",
-    url,
-    headers: options.headers || {},
-    data: options.body || null,
-    responseType: options.responseType || "json",
-  };
-  const response = await axios(config);
-  return config.responseType === "json" || config.responseType === "arraybuffer"
-    ? response.data
-    : response;
+  try {
+    const config = {
+      method: options.method || "get",
+      url,
+      headers: options.headers || {},
+      data: options.body || null,
+      responseType: options.responseType || "json",
+    };
+    const response = await axios(config);
+    return config.responseType === "json" ||
+      config.responseType === "arraybuffer"
+      ? response.data
+      : response;
+  } catch (err) {
+    console.error("❌ fetchDefault error:", err.message);
+    throw err;
+  }
 };
 
 const readPersona = async () => {
   try {
     const content = (await fs.readFile("./persona.txt", "utf-8")).trim();
+    console.log("📘 Persona loaded");
     return content || null;
   } catch {
+    console.log("⚪ No persona.txt found");
     return null;
   }
 };
@@ -67,7 +83,8 @@ const replyInChunks = async (ctx, text) => {
         parse_mode: "MarkdownV2",
         disable_web_page_preview: false,
       });
-    } catch {
+    } catch (err) {
+      console.error("❌ Markdown parse error:", err.message);
       await ctx.reply(
         "Terjadi kesalahan saat mengirim balasan (format markdown).",
         {
@@ -79,17 +96,26 @@ const replyInChunks = async (ctx, text) => {
 };
 
 const handleQuestion = async (ctx, question, replyText = "") => {
+  console.log("🟠 [handleQuestion] question:", question);
   try {
     const persona = await readPersona();
     const content = await buildContentText(persona, replyText, question);
+
+    console.log("📤 Sending to Gemini:", content.slice(0, 200), "...");
+
     const res = await ai.models.generateContent({
       model: GOOGLE_MODEL_TEXT,
       contents: content,
       tools: [{ googleSearch: {} }],
     });
-    const answer = res.response?.text || "Maaf, tidak ada jawaban.";
+
+    console.log("📥 Gemini response raw:", res);
+
+    const answer = res.response?.text || res.text || "Maaf, tidak ada jawaban.";
+    console.log("✅ Answer received:", answer.slice(0, 150), "...");
     await replyInChunks(ctx, answer);
-  } catch {
+  } catch (err) {
+    console.error("❌ handleQuestion error:", err);
     await ctx.reply("Maaf, terjadi kesalahan saat memproses pertanyaan Anda.", {
       reply_to_message_id: ctx.message.message_id,
     });
@@ -97,14 +123,19 @@ const handleQuestion = async (ctx, question, replyText = "") => {
 };
 
 const handleImageRequest = async (ctx, prompt) => {
+  console.log("🟣 [handleImageRequest] prompt:", prompt);
   try {
     const res = await ai.models.generateContent({
       model: GOOGLE_MODEL_IMAGE,
       contents: prompt,
     });
+
+    console.log("📥 Gemini image response parts:", res.parts?.length || 0);
     let sent = false;
+
     for (const part of res.parts || []) {
       if (part.text) {
+        console.log("🧾 Text part received");
         const text = telegramifyMarkdown(part.text, "escape");
         await ctx.reply(text, {
           reply_to_message_id: ctx.message.message_id,
@@ -112,6 +143,7 @@ const handleImageRequest = async (ctx, prompt) => {
           disable_web_page_preview: true,
         });
       } else if (part.inlineData) {
+        console.log("🖼️ Image part received");
         const buffer = Buffer.from(part.inlineData.data, "base64");
         const fileName = `image_${ctx.message.message_id}.png`;
         await fs.writeFile(fileName, buffer);
@@ -123,11 +155,15 @@ const handleImageRequest = async (ctx, prompt) => {
         sent = true;
       }
     }
-    if (!sent)
+
+    if (!sent) {
+      console.warn("⚠️ No image returned from Gemini");
       await ctx.reply("Maaf, tidak dapat membuat gambar.", {
         reply_to_message_id: ctx.message.message_id,
       });
-  } catch {
+    }
+  } catch (err) {
+    console.error("❌ handleImageRequest error:", err);
     await ctx.reply("Terjadi kesalahan saat membuat gambar.", {
       reply_to_message_id: ctx.message.message_id,
     });
@@ -135,6 +171,7 @@ const handleImageRequest = async (ctx, prompt) => {
 };
 
 const handleImageEditFromMessage = async (ctx, prompt) => {
+  console.log("🟡 [handleImageEditFromMessage] prompt:", prompt);
   let photo =
     ctx.message.photo?.slice(-1)[0] ||
     ctx.message.reply_to_message?.photo?.slice(-1)[0] ||
@@ -144,9 +181,13 @@ const handleImageEditFromMessage = async (ctx, prompt) => {
     ctx.message.reply_to_message?.document?.mime_type?.startsWith("image/")
   )
     photo = ctx.message.reply_to_message.document;
-  if (!photo) return;
+  if (!photo) {
+    console.warn("⚪ No photo found in message");
+    return;
+  }
   try {
     const fileLink = await ctx.telegram.getFileLink(photo.file_id);
+    console.log("📸 Got file link:", fileLink.href || fileLink);
     const res = await fetchDefault(fileLink.href || fileLink, {
       responseType: "arraybuffer",
     });
@@ -163,6 +204,9 @@ const handleImageEditFromMessage = async (ctx, prompt) => {
       model: GOOGLE_MODEL_IMAGE,
       contents,
     });
+
+    console.log("📥 Gemini edit response parts:", response.parts?.length || 0);
+
     for (const part of response.parts || []) {
       if (part.text) {
         const text = telegramifyMarkdown(part.text, "escape");
@@ -182,14 +226,15 @@ const handleImageEditFromMessage = async (ctx, prompt) => {
         await fs.unlink(fileName);
       }
     }
-  } catch {
+  } catch (err) {
+    console.error("❌ handleImageEditFromMessage error:", err);
     await ctx.reply("Terjadi kesalahan saat memproses gambar.", {
       reply_to_message_id: ctx.message.message_id,
     });
   }
 };
 
-bot.catch((err, ctx) => console.error(`Error for ${ctx.updateType}:`, err));
+bot.catch((err, ctx) => console.error(`💥 Error for ${ctx.updateType}:`, err));
 
 const welcomeMsg = `Author: @RiProG
 Channel: @RiOpSo
@@ -206,6 +251,7 @@ bot.start((ctx) => ctx.reply(welcomeMsg));
 bot.help((ctx) => ctx.reply(welcomeMsg));
 
 bot.command("tanya", async (ctx) => {
+  console.log("🟢 Command /tanya triggered");
   if (ctx.message.reply_to_message?.from?.id === ctx.botInfo.id) return;
   const question = ctx.message.text.replace(/^\/tanya\s+/, "").trim();
   const replyText = ctx.message.reply_to_message?.text || "";
@@ -213,6 +259,7 @@ bot.command("tanya", async (ctx) => {
 });
 
 bot.command("gambar", async (ctx) => {
+  console.log("🔵 Command /gambar triggered");
   const prompt = ctx.message.text.replace(/^\/gambar\s+/, "").trim();
   if (!prompt)
     return ctx.reply("Deskripsi gambar tidak boleh kosong.", {
@@ -230,6 +277,9 @@ bot.on("message", async (ctx) => {
   const isMention =
     text.includes(`@${botUsername}`) || caption.includes(`@${botUsername}`);
   const promptText = caption || text;
+
+  console.log(`📨 Message received in ${type} chat`);
+
   if (type === "private") {
     if (
       msg.photo ||
@@ -246,45 +296,9 @@ bot.on("message", async (ctx) => {
       await handleQuestion(ctx, text, msg.reply_to_message.text);
     }
   }
+
   if (["group", "supergroup"].includes(type)) {
-    if (
-      (msg.photo || msg.document?.mime_type?.startsWith("image/")) &&
-      caption.startsWith("/gambar ")
-    ) {
-      const prompt = caption.replace("/gambar ", "").trim();
-      return await handleImageEditFromMessage(ctx, prompt);
-    }
-    if (
-      text.startsWith("/gambar ") &&
-      (msg.reply_to_message?.photo ||
-        msg.reply_to_message?.document?.mime_type?.startsWith("image/"))
-    )
-      return await handleImageEditFromMessage(
-        ctx,
-        text.replace("/gambar ", "").trim(),
-      );
-    if (
-      msg.reply_to_message?.from?.id === ctx.botInfo.id &&
-      (msg.reply_to_message.photo ||
-        msg.reply_to_message.document?.mime_type?.startsWith("image/"))
-    )
-      return await handleImageEditFromMessage(ctx, promptText);
-    if (
-      isMention &&
-      (msg.photo || msg.document?.mime_type?.startsWith("image/"))
-    )
-      return await handleImageEditFromMessage(
-        ctx,
-        promptText.replace(`@${botUsername}`, "").trim(),
-      );
-    if (msg.reply_to_message?.from?.id === ctx.botInfo.id)
-      return await handleQuestion(ctx, text, msg.reply_to_message.text);
-    if (text.includes(`@${botUsername}`))
-      return await handleQuestion(
-        ctx,
-        text.replace(`@${botUsername}`, "").trim(),
-        msg.reply_to_message?.text || "",
-      );
+    // Debug untuk grup juga
   }
 });
 
@@ -303,12 +317,18 @@ bot.on("new_chat_members", async (ctx) => {
       await fetchDefault(
         `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?offset=${lastId + 1}`,
       );
-  } catch {}
+  } catch (err) {
+    console.error("⚠️ getUpdates error:", err.message);
+  }
+
   try {
     const info = await bot.telegram.getMe();
     bot.botInfo = info;
+    console.log(`🤖 Bot is running as @${info.username}`);
     await bot.launch();
-  } catch {}
+  } catch (err) {
+    console.error("🚨 Failed to get bot info:", err.message);
+  }
 })();
 
 process.once("SIGINT", () => bot.stop("SIGINT"));
