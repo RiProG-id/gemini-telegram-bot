@@ -12,8 +12,7 @@ const {
   GOOGLE_MODEL_IMAGE,
 } = process.env;
 
-console.log("🟢 Starting bot with config:");
-console.log({
+console.log("🟢 Starting bot with config:", {
   TELEGRAM_BOT_TOKEN: TELEGRAM_BOT_TOKEN ? "✅ Loaded" : "❌ Missing",
   GOOGLE_API_KEY: GOOGLE_API_KEY ? "✅ Loaded" : "❌ Missing",
   GOOGLE_MODEL_TEXT,
@@ -87,16 +86,13 @@ const replyInChunks = async (ctx, text) => {
       console.error("❌ Markdown parse error:", err.message);
       await ctx.reply(
         "Terjadi kesalahan saat mengirim balasan (format markdown).",
-        {
-          reply_to_message_id: ctx.message.message_id,
-        },
+        { reply_to_message_id: ctx.message.message_id },
       );
     }
   }
 };
 
 const handleQuestion = async (ctx, question, replyText = "") => {
-  console.log("🟠 [handleQuestion] question:", question);
   try {
     const persona = await readPersona();
     const content = await buildContentText(persona, replyText, question);
@@ -123,19 +119,16 @@ const handleQuestion = async (ctx, question, replyText = "") => {
 };
 
 const handleImageRequest = async (ctx, prompt) => {
-  console.log("🟣 [handleImageRequest] prompt:", prompt);
   try {
     const res = await ai.models.generateContent({
       model: GOOGLE_MODEL_IMAGE,
       contents: prompt,
     });
 
-    console.log("📥 Gemini image response parts:", res.parts?.length || 0);
     let sent = false;
 
     for (const part of res.parts || []) {
       if (part.text) {
-        console.log("🧾 Text part received");
         const text = telegramifyMarkdown(part.text, "escape");
         await ctx.reply(text, {
           reply_to_message_id: ctx.message.message_id,
@@ -143,7 +136,6 @@ const handleImageRequest = async (ctx, prompt) => {
           disable_web_page_preview: true,
         });
       } else if (part.inlineData) {
-        console.log("🖼️ Image part received");
         const buffer = Buffer.from(part.inlineData.data, "base64");
         const fileName = `image_${ctx.message.message_id}.png`;
         await fs.writeFile(fileName, buffer);
@@ -157,7 +149,6 @@ const handleImageRequest = async (ctx, prompt) => {
     }
 
     if (!sent) {
-      console.warn("⚠️ No image returned from Gemini");
       await ctx.reply("Maaf, tidak dapat membuat gambar.", {
         reply_to_message_id: ctx.message.message_id,
       });
@@ -171,7 +162,6 @@ const handleImageRequest = async (ctx, prompt) => {
 };
 
 const handleImageEditFromMessage = async (ctx, prompt) => {
-  console.log("🟡 [handleImageEditFromMessage] prompt:", prompt);
   let photo =
     ctx.message.photo?.slice(-1)[0] ||
     ctx.message.reply_to_message?.photo?.slice(-1)[0] ||
@@ -181,21 +171,20 @@ const handleImageEditFromMessage = async (ctx, prompt) => {
     ctx.message.reply_to_message?.document?.mime_type?.startsWith("image/")
   )
     photo = ctx.message.reply_to_message.document;
-  if (!photo) {
-    console.warn("⚪ No photo found in message");
-    return;
-  }
+  if (!photo) return;
+
   try {
     const fileLink = await ctx.telegram.getFileLink(photo.file_id);
-    console.log("📸 Got file link:", fileLink.href || fileLink);
     const res = await fetchDefault(fileLink.href || fileLink, {
       responseType: "arraybuffer",
     });
     const base64Image = Buffer.from(res).toString("base64");
+
     if (!prompt)
       return ctx.reply("Deskripsi gambar tidak boleh kosong.", {
         reply_to_message_id: ctx.message.message_id,
       });
+
     const contents = [
       { text: prompt },
       { inlineData: { mimeType: "image/jpeg", data: base64Image } },
@@ -204,8 +193,6 @@ const handleImageEditFromMessage = async (ctx, prompt) => {
       model: GOOGLE_MODEL_IMAGE,
       contents,
     });
-
-    console.log("📥 Gemini edit response parts:", response.parts?.length || 0);
 
     for (const part of response.parts || []) {
       if (part.text) {
@@ -251,15 +238,15 @@ bot.start((ctx) => ctx.reply(welcomeMsg));
 bot.help((ctx) => ctx.reply(welcomeMsg));
 
 bot.command("tanya", async (ctx) => {
-  console.log("🟢 Command /tanya triggered");
-  if (ctx.message.reply_to_message?.from?.id === ctx.botInfo.id) return;
   const question = ctx.message.text.replace(/^\/tanya\s+/, "").trim();
-  const replyText = ctx.message.reply_to_message?.text || "";
+  const replyText =
+    ctx.message.reply_to_message?.from?.id === ctx.botInfo.id
+      ? ctx.message.reply_to_message.text
+      : "";
   await handleQuestion(ctx, question, replyText);
 });
 
 bot.command("gambar", async (ctx) => {
-  console.log("🔵 Command /gambar triggered");
   const prompt = ctx.message.text.replace(/^\/gambar\s+/, "").trim();
   if (!prompt)
     return ctx.reply("Deskripsi gambar tidak boleh kosong.", {
@@ -274,37 +261,34 @@ bot.on("message", async (ctx) => {
   const text = msg.text?.trim() || "";
   const caption = msg.caption?.trim() || "";
   const botUsername = ctx.botInfo?.username || "";
-  const isMention =
-    text.includes(`@${botUsername}`) || caption.includes(`@${botUsername}`);
   const promptText = caption || text;
 
-  console.log(`📨 Message received in ${type} chat`);
-
   if (type === "private") {
-    if (
-      msg.photo ||
-      msg.reply_to_message?.photo ||
-      msg.reply_to_message?.document?.mime_type?.startsWith("image/")
-    )
-      return await handleImageEditFromMessage(ctx, promptText);
-    if (!/^\/(start|help|tanya |gambar )/.test(text)) {
-      if (!msg.reply_to_message?.text)
-        return ctx.reply(
-          `Silakan balas pesan sebelumnya atau gunakan perintah:\n/tanya [pertanyaan Anda]\n/gambar [deskripsi gambar]`,
-          { reply_to_message_id: msg.message_id },
-        );
+    let replyText = "";
+    if (msg.reply_to_message?.from?.id === ctx.botInfo.id)
+      replyText = msg.reply_to_message.text;
+    await handleQuestion(ctx, text, replyText);
+  }
+
+  if (["group", "supergroup"].includes(type)) {
+    if (msg.reply_to_message?.from?.id === ctx.botInfo.id) {
       await handleQuestion(ctx, text, msg.reply_to_message.text);
     }
   }
 
-  if (["group", "supergroup"].includes(type)) {
-    // Debug untuk grup juga
+  if (
+    msg.photo ||
+    msg.reply_to_message?.photo ||
+    msg.reply_to_message?.document?.mime_type?.startsWith("image/")
+  ) {
+    await handleImageEditFromMessage(ctx, promptText);
   }
 });
 
 bot.on("new_chat_members", async (ctx) => {
-  if (ctx.message.new_chat_members?.some((m) => m.id === ctx.botInfo.id))
+  if (ctx.message.new_chat_members?.some((m) => m.id === ctx.botInfo.id)) {
     await ctx.reply(welcomeMsg);
+  }
 });
 
 (async () => {
