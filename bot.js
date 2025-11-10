@@ -96,17 +96,13 @@ const handleQuestion = async (ctx, question, replyText = "") => {
   try {
     const persona = await readPersona();
     const content = await buildContentText(persona, replyText, question);
-
     console.log("📤 Sending to Gemini:", content.slice(0, 200), "...");
-
     const res = await ai.models.generateContent({
       model: GOOGLE_MODEL_TEXT,
       contents: content,
       tools: [{ googleSearch: {} }],
     });
-
     console.log("📥 Gemini response raw:", res);
-
     const answer = res.response?.text || res.text || "Maaf, tidak ada jawaban.";
     console.log("✅ Answer received:", answer.slice(0, 150), "...");
     await replyInChunks(ctx, answer);
@@ -124,9 +120,7 @@ const handleImageRequest = async (ctx, prompt) => {
       model: GOOGLE_MODEL_IMAGE,
       contents: prompt,
     });
-
     let sent = false;
-
     for (const part of res.parts || []) {
       if (part.text) {
         const text = telegramifyMarkdown(part.text, "escape");
@@ -147,12 +141,10 @@ const handleImageRequest = async (ctx, prompt) => {
         sent = true;
       }
     }
-
-    if (!sent) {
+    if (!sent)
       await ctx.reply("Maaf, tidak dapat membuat gambar.", {
         reply_to_message_id: ctx.message.message_id,
       });
-    }
   } catch (err) {
     console.error("❌ handleImageRequest error:", err);
     await ctx.reply("Terjadi kesalahan saat membuat gambar.", {
@@ -179,7 +171,6 @@ const handleImageEditFromMessage = async (ctx, prompt) => {
       responseType: "arraybuffer",
     });
     const base64Image = Buffer.from(res).toString("base64");
-
     if (!prompt)
       return ctx.reply("Deskripsi gambar tidak boleh kosong.", {
         reply_to_message_id: ctx.message.message_id,
@@ -260,7 +251,6 @@ bot.on("message", async (ctx) => {
   const { type } = msg.chat;
   const text = msg.text?.trim() || "";
   const caption = msg.caption?.trim() || "";
-  const botUsername = ctx.botInfo?.username || "";
   const promptText = caption || text;
 
   if (type === "private") {
@@ -268,20 +258,33 @@ bot.on("message", async (ctx) => {
     if (msg.reply_to_message?.from?.id === ctx.botInfo.id)
       replyText = msg.reply_to_message.text;
     await handleQuestion(ctx, text, replyText);
-  }
 
-  if (["group", "supergroup"].includes(type)) {
-    if (msg.reply_to_message?.from?.id === ctx.botInfo.id) {
-      await handleQuestion(ctx, text, msg.reply_to_message.text);
+    if (
+      msg.photo ||
+      msg.reply_to_message?.photo ||
+      msg.reply_to_message?.document?.mime_type?.startsWith("image/")
+    ) {
+      await handleImageEditFromMessage(ctx, promptText);
     }
   }
 
-  if (
-    msg.photo ||
-    msg.reply_to_message?.photo ||
-    msg.reply_to_message?.document?.mime_type?.startsWith("image/")
-  ) {
-    await handleImageEditFromMessage(ctx, promptText);
+  if (["group", "supergroup"].includes(type)) {
+    const isReplyToBot = msg.reply_to_message?.from?.id === ctx.botInfo.id;
+    const isCommandGambar =
+      text.startsWith("/gambar") || caption.startsWith("/gambar");
+
+    if (text && isReplyToBot) {
+      await handleQuestion(ctx, text, msg.reply_to_message.text);
+    }
+
+    if (
+      (msg.photo ||
+        msg.reply_to_message?.photo ||
+        msg.reply_to_message?.document?.mime_type?.startsWith("image/")) &&
+      (isCommandGambar || isReplyToBot)
+    ) {
+      await handleImageEditFromMessage(ctx, promptText);
+    }
   }
 });
 
